@@ -1,0 +1,16 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/BybitDownloader.Core/BybitDownloader.Core.csproj" />
+    <Project Path="src/BybitDownloader.Storage/BybitDownloader.Storage.csproj" />
+    <Project Path="src/BybitDownloader.Download/BybitDownloader.Download.csproj" />
+    <Project Path="src/BybitDownloader.Cli/BybitDownloader.Cli.csproj" />
+    <Project Path="src/BybitDownloader.Gui/BybitDownloader.Gui.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/BybitDownloader.Core.Tests/BybitDownloader.Core.Tests.csproj" />
+    <Project Path="tests/BybitDownloader.Storage.Tests/BybitDownloader.Storage.Tests.csproj" />
+    <Project Path="tests/BybitDownloader.Download.Tests/BybitDownloader.Download.Tests.csproj" />
+    <Project Path="tests/BybitDownloader.Cli.Tests/BybitDownloader.Cli.Tests.csproj" />
+    <Project Path="tests/BybitDownloader.Gui.Tests/BybitDownloader.Gui.Tests.csproj" />
+  </Folder>
+</Solution>

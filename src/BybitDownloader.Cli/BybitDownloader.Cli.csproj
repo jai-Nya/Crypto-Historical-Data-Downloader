@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <AssemblyName>bybit-dl</AssemblyName>
+    <RootNamespace>BybitDownloader.Cli</RootNamespace>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\BybitDownloader.Core\BybitDownloader.Core.csproj" />
+    <ProjectReference Include="..\BybitDownloader.Storage\BybitDownloader.Storage.csproj" />
+    <ProjectReference Include="..\BybitDownloader.Download\BybitDownloader.Download.csproj" />
+  </ItemGroup>
+</Project>

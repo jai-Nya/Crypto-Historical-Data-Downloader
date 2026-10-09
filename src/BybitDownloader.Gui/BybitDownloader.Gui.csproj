@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <RootNamespace>BybitDownloader.Gui</RootNamespace>
+    <AssemblyName>BybitDownloader.Gui</AssemblyName>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Avalonia" Version="12.1.3" />
+    <PackageReference Include="Avalonia.Desktop" Version="12.1.3" />
+    <PackageReference Include="Avalonia.Themes.Fluent" Version="12.1.3" />
+    <PackageReference Include="Avalonia.Fonts.Inter" Version="12.1.3" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\BybitDownloader.Core\BybitDownloader.Core.csproj" />
+    <ProjectReference Include="..\BybitDownloader.Storage\BybitDownloader.Storage.csproj" />
+    <ProjectReference Include="..\BybitDownloader.Download\BybitDownloader.Download.csproj" />
+  </ItemGroup>
+</Project>
