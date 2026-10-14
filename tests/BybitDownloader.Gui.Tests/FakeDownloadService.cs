@@ -1,6 +1,7 @@
 using BybitDownloader.Core.Models;
 using BybitDownloader.Core.Planning;
 using BybitDownloader.Core.Screening;
+using BybitDownloader.Core.Telemetry;
 using BybitDownloader.Download;
 using BybitDownloader.Gui.Services;
 using BybitDownloader.Storage;
@@ -30,7 +31,7 @@ internal sealed class FakeDownloadService : IDownloadService
     }
 
     public Task<DownloadJobResult> RunAsync(DownloadJob job, string outputRoot, string databasePath,
-        IProgress<DownloadProgress>? progress, CancellationToken ct)
+        IProgress<DownloadProgress>? progress, CancellationToken ct, ITelemetry? telemetry = null)
     {
         RunCalls++;
         LastJob = job;

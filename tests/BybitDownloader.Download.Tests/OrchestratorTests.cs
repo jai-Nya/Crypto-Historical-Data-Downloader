@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using BybitDownloader.Core.Api;
 using BybitDownloader.Core.Models;
 using BybitDownloader.Core.Planning;
+using BybitDownloader.Core.Telemetry;
 using BybitDownloader.Storage;
 
 namespace BybitDownloader.Download.Tests;
@@ -263,5 +264,25 @@ public class OrchestratorTests
         Assert.Throws<ArgumentException>(() => new DownloadOrchestrator(
             new FakeMarketData(), new FakeCandleStore(), new FakeChunkManifest(),
             new OrchestratorOptions { MaxParallelWorkers = 0 }));
+    }
+
+    [Fact]
+    public async Task Emits_chunk_lifecycle_telemetry()
+    {
+        var chunk = Chunk(5, "BTCUSDT", 2024, 1);
+        var collector = new CollectingTelemetry();
+        var orch = new DownloadOrchestrator(new FakeMarketData(), new FakeCandleStore(), new FakeChunkManifest(),
+            telemetry: collector);
+
+        await orch.RunAsync(Plan(chunk));
+
+        var started = Assert.Single(collector.Events, e => e.Kind == TelemetryKind.ChunkStarted);
+        Assert.Equal(chunk.Id, started.ChunkId);
+        Assert.Equal("BTCUSDT", started.Symbol);
+
+        var completed = Assert.Single(collector.Events, e => e.Kind == TelemetryKind.ChunkCompleted);
+        Assert.Equal(chunk.Id, completed.ChunkId);
+        Assert.False(completed.Failed);
+        Assert.Equal(5L, completed.Rows);
     }
 }

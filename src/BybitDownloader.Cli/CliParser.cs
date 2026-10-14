@@ -16,7 +16,8 @@ public sealed record CliOptions(
     string DatabasePath,
     int Workers,
     bool IncludeFormingCandle,
-    bool PlanOnly);
+    bool PlanOnly,
+    Exchange Exchange = Exchange.Bybit);
 
 public sealed record CliParseResult(CliOptions? Options, string? Error, bool ShowHelp)
 {
@@ -48,12 +49,14 @@ public static class CliParser
           --symbol SYM           Explicit symbol (repeatable)
           --screen               Screen the live universe instead of naming symbols
           --preset NAME          broad | balanced | strict (implies --screen; default balanced)
+          --include-tradfi       Include TradFi symbols (stocks, commodities, forex, ETFs)
 
         Options:
-          --category NAME        linear | inverse | both (default: both when screening, else linear)
+          --exchange NAME        bybit | binance | okx | kraken | kucoin (default: bybit)
+          --category NAME        linear | inverse | spot | both | all (default: both when screening, else linear)
           --out DIR              Output root for Parquet files (default: data)
           --db PATH              Manifest SQLite path (default: <out>/manifest.db)
-          --workers N            Parallel chunk workers (default: 4)
+          --workers N            Parallel chunk workers (default: 8)
           --include-forming      Include the current, still-forming candle
           --activity-minutes N   Candle-activity sample window; requires a preset with activity (strict)
           --plan-only            Screen/plan and print the workload without downloading
@@ -77,11 +80,13 @@ public static class CliParser
         var screen = false;
         var planOnly = false;
         var includeForming = false;
+        var includeTradFi = false;
         string? categoryArg = null;
+        string? exchangeArg = null;
         var presetName = "balanced";
         var outputRoot = "data";
         string? dbPath = null;
-        var workers = 4;
+        var workers = 8;
         int? activityMinutes = null;
 
         for (var i = 0; i < args.Count; i++)
@@ -100,6 +105,9 @@ public static class CliParser
                 case "--include-forming":
                     includeForming = true;
                     break;
+                case "--include-tradfi":
+                    includeTradFi = true;
+                    break;
                 case "--all":
                     all = true;
                     break;
@@ -110,6 +118,10 @@ public static class CliParser
                 case "--category":
                     if (!Next(args, ref i, out var cat, out var e2)) return CliParseResult.Fail(e2);
                     categoryArg = cat;
+                    break;
+                case "--exchange":
+                    if (!Next(args, ref i, out var exv, out var e2b)) return CliParseResult.Fail(e2b);
+                    exchangeArg = exv;
                     break;
                 case "--preset":
                     if (!Next(args, ref i, out var pv, out var e3)) return CliParseResult.Fail(e3);
@@ -179,6 +191,7 @@ public static class CliParser
         };
         if (screening is null)
             return CliParseResult.Fail($"Unknown --preset '{presetName}' (expected broad|balanced|strict).");
+        screening = screening with { IncludeTradFi = includeTradFi };
 
         if (!screen && symbols.Count == 0)
             return CliParseResult.Fail("No symbols selected. Use --symbol SYM (repeatable) or --screen.");
@@ -194,6 +207,10 @@ public static class CliParser
 
         var categories = ParseCategories(categoryArg, screen, out var catError);
         if (catError is not null) return CliParseResult.Fail(catError);
+
+        var exchange = Exchange.Bybit;
+        if (exchangeArg is not null && !ExchangeExtensions.TryFromSlug(exchangeArg, out exchange))
+            return CliParseResult.Fail($"Unknown --exchange '{exchangeArg}' (expected bybit|binance|okx|kraken|kucoin).");
 
         var ranges = new List<UtcRange>();
         foreach (var y in years) ranges.AddRange(PeriodSelector.Year(y));
@@ -223,7 +240,8 @@ public static class CliParser
         var database = string.IsNullOrWhiteSpace(dbPath) ? Path.Combine(root, "manifest.db") : dbPath;
 
         return CliParseResult.Ok(new CliOptions(
-            categories, screen, symbols, screening, activitySample, merged, root, database, workers, includeForming, planOnly));
+            categories, screen, symbols, screening, activitySample, merged, root, database, workers,
+            includeForming, planOnly, exchange));
     }
 
     private static bool Next(IReadOnlyList<string> args, ref int i, out string value, out string error)
@@ -248,9 +266,11 @@ public static class CliParser
         {
             case "linear": return [MarketCategory.Linear];
             case "inverse": return [MarketCategory.Inverse];
+            case "spot": return [MarketCategory.Spot];
             case "both": return [MarketCategory.Linear, MarketCategory.Inverse];
+            case "all": return [MarketCategory.Spot, MarketCategory.Linear, MarketCategory.Inverse];
             default:
-                error = $"Invalid --category value '{arg}' (expected linear|inverse|both).";
+                error = $"Invalid --category value '{arg}' (expected linear|inverse|spot|both|all).";
                 return [];
         }
     }

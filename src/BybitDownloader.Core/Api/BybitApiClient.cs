@@ -1,40 +1,29 @@
 using System.Globalization;
-using System.Net;
 using BybitDownloader.Core.Models;
 using BybitDownloader.Core.Resilience;
 
 namespace BybitDownloader.Core.Api;
 
-public interface IBybitMarketData
-{
-    Task<IReadOnlyList<Instrument>> GetInstrumentsAsync(MarketCategory category, CancellationToken ct);
-    Task<IReadOnlyList<Ticker>> GetTickersAsync(MarketCategory category, CancellationToken ct);
-    /// <summary>1-minute klines for [startMs, endMsInclusive]. Returned in API order (newest first); caller sorts.</summary>
-    Task<IReadOnlyList<Candle>> GetKlinesAsync(MarketCategory category, string symbol, long startMs, long endMsInclusive, CancellationToken ct);
-}
-
 /// <summary>
-/// Public REST client. EVERY request goes through the shared limiter and retry policy.
+/// Bybit public REST client. EVERY request goes through the shared limiter and retry policy (one per category).
 /// The HttpClient is injected (single long-lived instance owned by the host).
 /// </summary>
-public sealed class BybitApiClient : IBybitMarketData
+public sealed class BybitApiClient : ExchangeHttpClient
 {
     public const string DefaultBaseUrl = "https://api.bybit.com";
     private const int MaxInstrumentPages = 50;
 
-    private readonly HttpClient _http;
-    private readonly AdaptiveRateLimiter _limiter;
-    private readonly RetryPolicy _retry;
-
     public BybitApiClient(HttpClient http, AdaptiveRateLimiter limiter, RetryPolicy retry)
+        : base(http, ExchangeProfiles.Get(Exchange.Bybit), (_, _) => limiter, (_, _) => retry)
     {
-        _http = http;
-        _limiter = limiter;
-        _retry = retry;
-        _http.BaseAddress ??= new Uri(DefaultBaseUrl);
     }
 
-    public async Task<IReadOnlyList<Instrument>> GetInstrumentsAsync(MarketCategory category, CancellationToken ct)
+    public BybitApiClient(HttpClient http, ExchangeProfile? profile = null)
+        : base(http, profile ?? ExchangeProfiles.Get(Exchange.Bybit))
+    {
+    }
+
+    public override async Task<IReadOnlyList<Instrument>> GetInstrumentsAsync(MarketCategory category, CancellationToken ct)
     {
         var all = new List<Instrument>();
         var seenCursors = new HashSet<string>();
@@ -44,7 +33,7 @@ public sealed class BybitApiClient : IBybitMarketData
         {
             var url = $"/v5/market/instruments-info?category={category.ToApiString()}&limit=1000"
                       + (cursor is null ? "" : $"&cursor={Uri.EscapeDataString(cursor)}");
-            var result = await SendAsync(url, json => BybitParser.ParseInstruments(json, category), ct).ConfigureAwait(false);
+            var result = await SendAsync(category, url, json => BybitParser.ParseInstruments(json, category), ct).ConfigureAwait(false);
             all.AddRange(result.Items);
 
             if (string.IsNullOrEmpty(result.NextCursor)) return all;
@@ -55,77 +44,36 @@ public sealed class BybitApiClient : IBybitMarketData
         throw new ApiException($"Instrument pagination exceeded {MaxInstrumentPages} pages", false);
     }
 
-    public Task<IReadOnlyList<Ticker>> GetTickersAsync(MarketCategory category, CancellationToken ct) =>
-        SendAsync($"/v5/market/tickers?category={category.ToApiString()}", BybitParser.ParseTickers, ct);
+    public override Task<IReadOnlyList<Ticker>> GetTickersAsync(MarketCategory category, CancellationToken ct) =>
+        SendAsync(category, $"/v5/market/tickers?category={category.ToApiString()}", BybitParser.ParseTickers, ct);
 
-    public Task<IReadOnlyList<Candle>> GetKlinesAsync(
+    public override Task<IReadOnlyList<Candle>> GetKlinesAsync(
         MarketCategory category, string symbol, long startMs, long endMsInclusive, CancellationToken ct)
     {
         var url = string.Create(CultureInfo.InvariantCulture,
-            $"/v5/market/kline?category={category.ToApiString()}&symbol={Uri.EscapeDataString(symbol)}&interval=1&start={startMs}&end={endMsInclusive}&limit=1000");
-        return SendAsync(url, BybitParser.ParseKlines, ct);
+            $"/v5/market/kline?category={category.ToApiString()}&symbol={Uri.EscapeDataString(symbol)}&interval=1" +
+            $"&start={startMs}&end={endMsInclusive}&limit={Profile.MaxCandlesPerRequest(category)}");
+        return SendAsync(category, url, BybitParser.ParseKlines, ct);
     }
 
-    private Task<T> SendAsync<T>(string relativeUrl, Func<string, T> parse, CancellationToken ct) =>
-        _retry.ExecuteAsync(async t =>
-        {
-            await _limiter.AcquireAsync(t).ConfigureAwait(false);
-            using var response = await _http.GetAsync(relativeUrl, t).ConfigureAwait(false);
-            ReportHeaders(response);
+    protected override bool IsAccessDeniedStatus(int status) => status == 403;
 
-            var status = (int)response.StatusCode;
-            if (status == 429)
-            {
-                var ra = ReadRetryAfter(response) ?? TimeSpan.FromSeconds(5);
-                _limiter.ReportRateLimited(ra);
-                throw new ApiException("HTTP 429 rate limited", true, ra);
-            }
-            if (status == 403)
-            {
-                // Bybit uses 403 for an IP-level limit breach (temporary ban). Back off hard.
-                var ra = TimeSpan.FromMinutes(10);
-                _limiter.ReportRateLimited(ra);
-                throw new ApiException("HTTP 403 (IP rate limit / access denied)", true, ra);
-            }
-            if (status >= 500) throw new ApiException($"HTTP {status}", true);
-            if (!response.IsSuccessStatusCode) throw new ApiException($"HTTP {status}", false);
-
-            var body = await response.Content.ReadAsStringAsync(t).ConfigureAwait(false);
-            T parsed;
-            try
-            {
-                parsed = parse(body);
-            }
-            catch (BybitApiException ex) when (ex.IsRateLimit)
-            {
-                _limiter.ReportRateLimited(ex.RetryAfter);
-                throw;
-            }
-            _limiter.ReportSuccess();
-            return parsed;
-        }, ct);
-
-    private void ReportHeaders(HttpResponseMessage r)
+    protected override TimeSpan AccessDeniedBackoff(MarketCategory category)
     {
+        // Bybit uses 403 for an IP-level limit breach (temporary ban). Back off hard.
+        _ = category;
+        return TimeSpan.FromMinutes(10);
+    }
+
+    protected override void OnResponseHeaders(MarketCategory category, HttpResponseMessage r)
+    {
+        _ = category;
         var limit = HeaderInt(r, "X-Bapi-Limit");
         var remaining = HeaderInt(r, "X-Bapi-Limit-Status");
         DateTimeOffset? reset = null;
         if (r.Headers.TryGetValues("X-Bapi-Limit-Reset-Timestamp", out var v)
             && long.TryParse(v.FirstOrDefault(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var ms))
             reset = DateTimeOffset.FromUnixTimeMilliseconds(ms);
-        _limiter.ReportHeaders(limit, remaining, reset);
-    }
-
-    private static int? HeaderInt(HttpResponseMessage r, string name) =>
-        r.Headers.TryGetValues(name, out var v)
-        && int.TryParse(v.FirstOrDefault(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var i) ? i : null;
-
-    private static TimeSpan? ReadRetryAfter(HttpResponseMessage r)
-    {
-        var ra = r.Headers.RetryAfter;
-        if (ra is null) return null;
-        if (ra.Delta is { } d) return d;
-        if (ra.Date is { } dt) { var diff = dt - DateTimeOffset.UtcNow; return diff > TimeSpan.Zero ? diff : TimeSpan.Zero; }
-        return null;
+        LimiterFor(category).ReportHeaders(limit, remaining, reset);
     }
 }

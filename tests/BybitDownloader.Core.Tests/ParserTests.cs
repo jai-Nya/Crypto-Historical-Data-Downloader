@@ -36,6 +36,28 @@ public class ParserTests
     }
 
     [Fact]
+    public void TradFi_symbols_are_flagged_by_symbolType_or_marketRegion()
+    {
+        const string json = """
+        {"retCode":0,"retMsg":"OK","result":{"category":"linear","list":[
+          {"symbol":"AAPLUSDT","contractType":"LinearPerpetual","status":"Trading","baseCoin":"AAPL","quoteCoin":"USDT","settleCoin":"USDT","symbolType":"stock","marketRegion":"US","priceFilter":{"tickSize":"0.01"}},
+          {"symbol":"XAUUSDT","contractType":"LinearPerpetual","status":"Trading","baseCoin":"XAU","quoteCoin":"USDT","settleCoin":"USDT","symbolType":"commodity","priceFilter":{"tickSize":"0.01"}},
+          {"symbol":"EURUSDT","contractType":"LinearPerpetual","status":"Trading","baseCoin":"EUR","quoteCoin":"USDT","settleCoin":"USDT","symbolType":"forex","priceFilter":{"tickSize":"0.0001"}},
+          {"symbol":"BTCUSDT","contractType":"LinearPerpetual","status":"Trading","baseCoin":"BTC","quoteCoin":"USDT","settleCoin":"USDT","symbolType":"","priceFilter":{"tickSize":"0.10"}},
+          {"symbol":"INNOVUSDT","contractType":"LinearPerpetual","status":"Trading","baseCoin":"INNOV","quoteCoin":"USDT","settleCoin":"USDT","symbolType":"innovation","priceFilter":{"tickSize":"0.0001"}}
+        ]},"time":1}
+        """;
+        var items = BybitParser.ParseInstruments(json, MarketCategory.Linear).Items;
+        Assert.True(items[0].IsTradFi); // stock
+        Assert.True(items[1].IsTradFi); // commodity
+        Assert.True(items[2].IsTradFi); // forex
+        Assert.False(items[3].IsTradFi);   // normal crypto perp
+        Assert.False(items[4].IsTradFi);   // innovation zone is crypto, not TradFi
+        Assert.Equal("stock", items[0].SymbolType);
+        Assert.Equal("US", items[0].MarketRegion);
+    }
+
+    [Fact]
     public void Klines_are_returned_in_response_order_not_sorted()
     {
         var c = BybitParser.ParseKlines(Fx.KlineJson(Fx.B + 120_000, Fx.B + 60_000, Fx.B));

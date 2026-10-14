@@ -1,6 +1,7 @@
 using BybitDownloader.Core.Models;
 using BybitDownloader.Core.Planning;
 using BybitDownloader.Core.Screening;
+using BybitDownloader.Core.Telemetry;
 using BybitDownloader.Download;
 using BybitDownloader.Gui.Services;
 using BybitDownloader.Gui.ViewModels;
@@ -25,9 +26,22 @@ public class MainWindowViewModelTests
         Assert.Equal([MarketCategory.Linear, MarketCategory.Inverse], job.Categories);
         Assert.Single(job.Ranges);
         Assert.Equal(PeriodSelector.Month(2024, 6), job.Ranges[0]);
-        Assert.Equal(4, job.Orchestrator.MaxParallelWorkers);
+        Assert.Equal(8, job.Orchestrator.MaxParallelWorkers);
         Assert.Equal(ScreeningPresets.Balanced.Name, job.Screening.Name);
         Assert.Equal(Now, job.Now);
+        Assert.False(job.Screening.IncludeTradFi);
+    }
+
+    [Fact]
+    public void TradFi_ExcludedByDefault_AndCanBeEnabled()
+    {
+        var vm = Vm();
+
+        var job = vm.BuildJob();
+        Assert.False(job.Screening.IncludeTradFi);
+
+        vm.IncludeTradFi = true;
+        Assert.True(vm.BuildJob().Screening.IncludeTradFi);
     }
 
     [Fact]
@@ -75,7 +89,7 @@ public class MainWindowViewModelTests
     public void ExplicitSymbols_AreParsedAndDeduplicated()
     {
         var vm = Vm();
-        vm.SymbolMode = "Explicit symbols";
+        vm.SymbolMode = "Specific symbols";
         vm.SymbolsText = "BTCUSDT, ETHUSDT, BTCUSDT\nSOLUSDT";
 
         var job = vm.BuildJob();
@@ -85,18 +99,26 @@ public class MainWindowViewModelTests
     }
 
     [Fact]
-    public void CategoryMode_Inverse_SelectsInverseOnly()
+    public void InverseOnly_WhenOnlyInverseChecked()
     {
         var vm = Vm();
-        vm.CategoryMode = "inverse";
+        vm.IsLinear = false;
         Assert.Equal([MarketCategory.Inverse], vm.BuildJob().Categories);
+    }
+
+    [Fact]
+    public void AllMarketTypes_AreOrderedSpotLinearInverse()
+    {
+        var vm = Vm();
+        vm.IsSpot = true;
+        Assert.Equal([MarketCategory.Spot, MarketCategory.Linear, MarketCategory.Inverse], vm.BuildJob().Categories);
     }
 
     [Fact]
     public void ExplicitMode_WithoutSymbols_Throws()
     {
         var vm = Vm();
-        vm.SymbolMode = "Explicit symbols";
+        vm.SymbolMode = "Specific symbols";
         vm.SymbolsText = "   ";
 
         Assert.Throws<InvalidOperationException>(() => vm.BuildJob());
@@ -256,6 +278,11 @@ public class MainWindowViewModelTests
         Assert.Contains("1,440 candles", vm.Status);
     }
 
+    private static FileValidationReport Row(string cat, string sym, int y, int m,
+        long rows, long expected, double coverage, FileValidationStatus status) =>
+        new($"{cat}/{sym}/{y:D4}-{m:D2}", cat, sym, y, m, rows, expected, coverage, 0, 0,
+            0, 0, 0, 0, 0, 0, 0, true, status, []);
+
     [Fact]
     public void DatabasePath_FollowsOutputRoot()
     {
@@ -263,11 +290,6 @@ public class MainWindowViewModelTests
         vm.OutputRoot = "D:/hist";
         Assert.Equal(Path.Combine("D:/hist", "manifest.db"), vm.DatabasePath);
     }
-
-    private static FileValidationReport Row(string cat, string sym, int y, int m,
-        long rows, long expected, double coverage, FileValidationStatus status) =>
-        new($"{cat}/{sym}/{y:D4}-{m:D2}", cat, sym, y, m, rows, expected, coverage, 0, 0,
-            0, 0, 0, 0, 0, 0, 0, true, status, []);
 
     [Fact]
     public async Task ValidateAsync_PopulatesReportRows()
@@ -294,5 +316,213 @@ public class MainWindowViewModelTests
         Assert.Equal("ok", vm.Rows[1].Status);
         Assert.Contains("1 ok, 1 warnings, 0 errors", vm.Status);
         Assert.False(vm.IsRunning);
+    }
+
+    [Fact]
+    public void Wizard_StartsOnExchangeStep()
+    {
+        var vm = Vm();
+        Assert.True(vm.IsExchangeStep);
+        Assert.False(vm.CanGoBack);
+        Assert.True(vm.CanGoNext);
+    }
+
+    [Fact]
+    public void Next_AdvancesThroughSetupSteps()
+    {
+        var vm = Vm();
+        vm.NextCommand.Execute(null);
+        Assert.True(vm.IsMarketStep);
+        vm.NextCommand.Execute(null);
+        Assert.True(vm.IsPeriodStep);
+        vm.NextCommand.Execute(null);
+        Assert.True(vm.IsOptionsStep);
+        vm.NextCommand.Execute(null);
+        Assert.True(vm.IsSummaryStep);
+        Assert.False(vm.CanGoNext);
+    }
+
+    [Fact]
+    public void Next_MarketStep_WithoutCategory_StaysAndReportsError()
+    {
+        var vm = Vm();
+        vm.NextCommand.Execute(null);
+        Assert.True(vm.IsMarketStep);
+
+        vm.IsLinear = false;
+        vm.IsInverse = false;
+        vm.NextCommand.Execute(null);
+
+        Assert.True(vm.IsMarketStep);
+        Assert.StartsWith("Error:", vm.Status);
+    }
+
+    [Fact]
+    public void Back_ReturnsToPreviousStep()
+    {
+        var vm = Vm();
+        vm.NextCommand.Execute(null);
+        vm.NextCommand.Execute(null);
+        Assert.True(vm.IsPeriodStep);
+        vm.BackCommand.Execute(null);
+        Assert.True(vm.IsMarketStep);
+    }
+
+    [Fact]
+    public void SelectPeriodCommand_SetsPeriodMode()
+    {
+        var vm = Vm();
+        vm.SelectPeriodCommand.Execute("Year");
+        Assert.True(vm.IsYearPeriod);
+        Assert.False(vm.IsMonthPeriod);
+    }
+
+    [Fact]
+    public void SelectExchangeCommand_SetsExchangeMode()
+    {
+        var vm = Vm();
+        vm.SelectExchangeCommand.Execute("binance");
+        Assert.Equal("binance", vm.ExchangeMode);
+        Assert.Equal("Binance", vm.SelectedExchangeName);
+
+        vm.SelectExchangeCommand.Execute("not-an-exchange");
+        Assert.Equal("binance", vm.ExchangeMode);
+    }
+
+    [Fact]
+    public void WindowBackground_IsBlackUntilAnExchangeIsChosen_ThenUsesItsPalette()
+    {
+        var vm = Vm();
+        Assert.Equal("#000000", vm.WindowBackgroundColor);
+
+        // The window darkens to 20% of the brand accent.
+        vm.SelectExchangeCommand.Execute("kraken");
+        Assert.Equal("#160A31", vm.WindowBackgroundColor);
+
+        vm.SelectExchangeCommand.Execute("bybit");
+        Assert.Equal("#312100", vm.WindowBackgroundColor);
+
+        // Re-picking the current exchange still re-applies its tint, and unknown slugs are ignored.
+        vm.SelectExchangeCommand.Execute("bybit");
+        Assert.Equal("#312100", vm.WindowBackgroundColor);
+
+        vm.SelectExchangeCommand.Execute("nope");
+        Assert.Equal("#312100", vm.WindowBackgroundColor);
+    }
+
+    [Fact]
+    public void PrimaryCommand_AdvancesUntilReview_ThenStartsTheDownload()
+    {
+        var vm = Vm();
+
+        // Steps 0..3: the footer primary button just advances and stays enabled.
+        for (var i = 0; i < 4; i++)
+        {
+            Assert.True(vm.PrimaryCommand.CanExecute(null));
+            vm.PrimaryCommand.Execute(null);
+        }
+
+        // Review step: the button reads "Start download" and must be enabled, not greyed out.
+        Assert.True(vm.IsSummaryStep);
+        Assert.Equal("Start download", vm.NextLabel);
+        Assert.True(vm.PrimaryCommand.CanExecute(null));
+
+        vm.PrimaryCommand.Execute(null);
+        Assert.True(vm.IsMonitorStep);
+    }
+
+    [Fact]
+    public void StepText_MatchesTheWizardCopy()
+    {
+        var vm = Vm();
+        Assert.Equal("Exchange", vm.StepTitle);
+        Assert.Equal("Choose the exchange for this run.", vm.StepSubtitle);
+        Assert.True(vm.ShowNext);
+        Assert.False(vm.ShowBack);
+        Assert.False(vm.ShowMonitorActions);
+        Assert.Equal("Next", vm.NextLabel);
+
+        vm.NextCommand.Execute(null);
+        vm.NextCommand.Execute(null);
+        vm.NextCommand.Execute(null);
+        vm.NextCommand.Execute(null);
+        Assert.True(vm.IsSummaryStep);
+        Assert.Equal("Review & start", vm.StepTitle);
+        Assert.Equal("Start download", vm.NextLabel);
+        Assert.True(vm.ShowBack);
+    }
+
+    [Fact]
+    public void Next_WithInvalidInput_ReportsError_AndClearsItOnTheNextStep()
+    {
+        var vm = Vm();
+        vm.NextCommand.Execute(null);   // -> Markets
+        vm.IsSpot = vm.IsLinear = vm.IsInverse = false;
+
+        vm.NextCommand.Execute(null);
+        Assert.Contains("market type", vm.ErrorMessage);
+        Assert.True(vm.IsMarketStep);
+
+        vm.IsLinear = true;
+        vm.NextCommand.Execute(null);
+        Assert.True(vm.IsPeriodStep);
+        Assert.Equal("", vm.ErrorMessage);
+    }
+
+    [Fact]
+    public void SummaryText_DescribesSelections()
+    {
+        var vm = Vm();
+        vm.ExchangeMode = "binance";
+        vm.NextCommand.Execute(null);
+        Assert.True(vm.IsMarketStep);
+        vm.NextCommand.Execute(null);
+        vm.NextCommand.Execute(null);
+        vm.NextCommand.Execute(null);
+        Assert.True(vm.IsSummaryStep);
+
+        Assert.Contains("Binance", vm.SummaryText);
+        Assert.Contains("linear, inverse", vm.SummaryText);
+    }
+
+    [Fact]
+    public async Task Browse_UsesFolderPicker()
+    {
+        var vm = new MainWindowViewModel(new FakeDownloadService(), post: a => a(), clock: () => Now,
+            folderPicker: () => Task.FromResult<string?>("D:/picked"));
+        await ((AsyncRelayCommand)vm.BrowseCommand).ExecuteAsync();
+
+        Assert.Equal("D:/picked", vm.OutputRoot);
+    }
+
+    [Fact]
+    public void ApplyTelemetry_TracksRowsAndRetries()
+    {
+        var vm = Vm();
+
+        vm.ApplyTelemetry(new TelemetryEvent(TelemetryKind.ChunkStarted, TelemetryLevel.Info, "start",
+            ChunkId: "bybit/linear/BTCUSDT/202406", Symbol: "BTCUSDT", Category: MarketCategory.Linear));
+        Assert.Equal("BTCUSDT", vm.CurrentSymbol);
+        Assert.Equal("running", vm.Rows[0].Status);
+        Assert.Equal("BTCUSDT", vm.Rows[0].Symbol);
+
+        vm.ApplyTelemetry(new TelemetryEvent(TelemetryKind.Retry, TelemetryLevel.Warning, "retry",
+            ChunkId: "bybit/linear/BTCUSDT/202406", Attempt: 2));
+        Assert.Equal(1, vm.RetryCount);
+        Assert.Equal(1, vm.Rows[0].Retries);
+
+        vm.ApplyTelemetry(new TelemetryEvent(TelemetryKind.ChunkCompleted, TelemetryLevel.Info, "done",
+            ChunkId: "bybit/linear/BTCUSDT/202406", Rows: 43200));
+        Assert.Equal("done", vm.Rows[0].Status);
+        Assert.Equal("43,200", vm.Rows[0].RowsText);
+        Assert.NotEmpty(vm.Logs);
+    }
+
+    [Fact]
+    public async Task StartAsync_NavigatesToMonitor()
+    {
+        var vm = Vm();
+        await vm.StartAsync();
+        Assert.True(vm.IsMonitorStep);
     }
 }

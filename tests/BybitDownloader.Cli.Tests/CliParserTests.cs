@@ -43,7 +43,7 @@ public class CliParserTests
         Assert.Equal(new DateTimeOffset(2024, 2, 1, 0, 0, 0, TimeSpan.Zero), range.End);
         Assert.Equal("data", o.OutputRoot);
         Assert.Equal(Path.Combine("data", "manifest.db"), o.DatabasePath);
-        Assert.Equal(4, o.Workers);
+        Assert.Equal(8, o.Workers);
         Assert.False(o.PlanOnly);
     }
 
@@ -68,6 +68,13 @@ public class CliParserTests
         Assert.Equal("Strict", o.Screening.Name);
         Assert.True(o.ActivitySample.HasValue);
         Assert.Equal(UtcRange.Create(Now.AddMinutes(-60), Now), o.ActivitySample.Value);
+    }
+
+    [Fact]
+    public void TradFi_excluded_by_default_and_included_with_flag()
+    {
+        Assert.False(Ok("--screen", "--year", "2024").Screening.IncludeTradFi);
+        Assert.True(Ok("--screen", "--year", "2024", "--include-tradfi").Screening.IncludeTradFi);
     }
 
     [Fact]

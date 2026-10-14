@@ -1,3 +1,4 @@
+using BybitDownloader.Core.Models;
 using BybitDownloader.Core.Planning;
 
 namespace BybitDownloader.Storage;
@@ -24,7 +25,8 @@ public sealed record ChunkRecord(
     double Coverage,
     string? FilePath,
     string? Issues,
-    string UpdatedUtc);
+    string UpdatedUtc,
+    Exchange Exchange = Exchange.Bybit);
 
 /// <summary>Tracks per-chunk completion so a re-run can resume. Keyed by the deterministic <see cref="DownloadChunk.Id"/>.</summary>
 public interface IChunkManifest

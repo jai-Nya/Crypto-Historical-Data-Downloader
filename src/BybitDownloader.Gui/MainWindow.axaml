@@ -3,98 +3,260 @@
         xmlns:vm="using:BybitDownloader.Gui.ViewModels"
         x:Class="BybitDownloader.Gui.MainWindow"
         x:DataType="vm:MainWindowViewModel"
-        Title="Bybit Perpetual Futures Downloader"
-        Width="920" Height="680"
-        MinWidth="760" MinHeight="520">
-  <Grid Margin="16" RowDefinitions="Auto,Auto,Auto,Auto,*">
+        Title="Crypto 1-minute candle downloader"
+        Width="860" Height="660" MinWidth="780" MinHeight="620"
+        WindowStartupLocation="CenterScreen"
+        Background="{Binding WindowBackgroundColor, Converter={StaticResource HexToBrush}}"
+        Foreground="White"
+        FontFamily="Segoe UI Variable, Segoe UI" FontSize="13">
 
-    <StackPanel Grid.Row="0" Spacing="2" Margin="0,0,0,12">
-      <TextBlock Text="Bybit Perpetual Futures — 1-minute candle downloader"
-                 FontSize="18" FontWeight="SemiBold" />
-      <TextBlock Text="Plan a period and symbols, preview the workload, then download resumable monthly Parquet chunks."
-                 Opacity="0.7" TextWrapping="Wrap" />
+  <Window.Transitions>
+    <Transitions>
+      <BrushTransition Property="Background" Duration="0:0:0.25" />
+    </Transitions>
+  </Window.Transitions>
+
+  <Grid Margin="28,22,28,20" RowDefinitions="Auto,*,Auto">
+
+    <!-- Header: step dots + step title + one-line hint. -->
+    <StackPanel Grid.Row="0" Margin="0,0,0,18">
+      <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
+        <Ellipse Width="9" Height="9" Margin="0,0,7,0" Fill="White"
+                 Opacity="{Binding Step, Converter={StaticResource DotOpacity}, ConverterParameter=0}" />
+        <Ellipse Width="9" Height="9" Margin="0,0,7,0" Fill="White"
+                 Opacity="{Binding Step, Converter={StaticResource DotOpacity}, ConverterParameter=1}" />
+        <Ellipse Width="9" Height="9" Margin="0,0,7,0" Fill="White"
+                 Opacity="{Binding Step, Converter={StaticResource DotOpacity}, ConverterParameter=2}" />
+        <Ellipse Width="9" Height="9" Margin="0,0,7,0" Fill="White"
+                 Opacity="{Binding Step, Converter={StaticResource DotOpacity}, ConverterParameter=3}" />
+        <Ellipse Width="9" Height="9" Margin="0,0,7,0" Fill="White"
+                 Opacity="{Binding Step, Converter={StaticResource DotOpacity}, ConverterParameter=4}" />
+        <Ellipse Width="9" Height="9" Fill="White"
+                 Opacity="{Binding Step, Converter={StaticResource DotOpacity}, ConverterParameter=5}" />
+      </StackPanel>
+      <TextBlock Text="{Binding StepTitle}" Foreground="White" FontSize="26" FontWeight="SemiBold" />
+      <TextBlock Text="{Binding StepSubtitle}" Foreground="White" Opacity="0.6" Margin="0,2,0,0" />
     </StackPanel>
 
-    <Border Grid.Row="1" BorderBrush="#33000000" BorderThickness="1" CornerRadius="6" Padding="14" Margin="0,0,0,12">
-      <Grid ColumnDefinitions="Auto,200,Auto,200" RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto"
-            IsEnabled="{Binding CanEdit}"
-            ColumnSpacing="10" RowSpacing="8">
+    <!-- Pages: exactly one is visible at a time. -->
+    <Grid Grid.Row="1">
 
-        <TextBlock Grid.Row="0" Grid.Column="0" Text="Period" VerticalAlignment="Center" />
-        <ComboBox Grid.Row="0" Grid.Column="1" HorizontalAlignment="Stretch"
-                  ItemsSource="{Binding PeriodModes}" SelectedItem="{Binding PeriodMode, Mode=TwoWay}" />
+      <!-- 1 Exchange -->
+      <StackPanel IsVisible="{Binding IsExchangeStep}" VerticalAlignment="Center">
+        <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+          <RadioButton GroupName="ex" Classes="tile"
+                       IsChecked="{Binding ExchangeMode, Converter={StaticResource Equals}, ConverterParameter=bybit, Mode=TwoWay}"
+                       Command="{Binding SelectExchangeCommand}" CommandParameter="bybit">
+            <StackPanel>
+              <Ellipse Width="14" Height="14" Fill="#F7A600" Margin="0,0,0,10" HorizontalAlignment="Center" />
+              <TextBlock Text="Bybit" FontSize="17" FontWeight="SemiBold" HorizontalAlignment="Center" />
+            </StackPanel>
+          </RadioButton>
+          <RadioButton GroupName="ex" Classes="tile"
+                       IsChecked="{Binding ExchangeMode, Converter={StaticResource Equals}, ConverterParameter=binance, Mode=TwoWay}"
+                       Command="{Binding SelectExchangeCommand}" CommandParameter="binance">
+            <StackPanel>
+              <Ellipse Width="14" Height="14" Fill="#F0B90B" Margin="0,0,0,10" HorizontalAlignment="Center" />
+              <TextBlock Text="Binance" FontSize="17" FontWeight="SemiBold" HorizontalAlignment="Center" />
+            </StackPanel>
+          </RadioButton>
+          <RadioButton GroupName="ex" Classes="tile"
+                       IsChecked="{Binding ExchangeMode, Converter={StaticResource Equals}, ConverterParameter=okx, Mode=TwoWay}"
+                       Command="{Binding SelectExchangeCommand}" CommandParameter="okx">
+            <StackPanel>
+              <Ellipse Width="14" Height="14" Fill="#BDBDBD" Margin="0,0,0,10" HorizontalAlignment="Center" />
+              <TextBlock Text="OKX" FontSize="17" FontWeight="SemiBold" HorizontalAlignment="Center" />
+            </StackPanel>
+          </RadioButton>
+        </StackPanel>
+        <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+          <RadioButton GroupName="ex" Classes="tile"
+                       IsChecked="{Binding ExchangeMode, Converter={StaticResource Equals}, ConverterParameter=kraken, Mode=TwoWay}"
+                       Command="{Binding SelectExchangeCommand}" CommandParameter="kraken">
+            <StackPanel>
+              <Ellipse Width="14" Height="14" Fill="#7132F5" Margin="0,0,0,10" HorizontalAlignment="Center" />
+              <TextBlock Text="Kraken" FontSize="17" FontWeight="SemiBold" HorizontalAlignment="Center" />
+            </StackPanel>
+          </RadioButton>
+          <RadioButton GroupName="ex" Classes="tile"
+                       IsChecked="{Binding ExchangeMode, Converter={StaticResource Equals}, ConverterParameter=kucoin, Mode=TwoWay}"
+                       Command="{Binding SelectExchangeCommand}" CommandParameter="kucoin">
+            <StackPanel>
+              <Ellipse Width="14" Height="14" Fill="#23AF91" Margin="0,0,0,10" HorizontalAlignment="Center" />
+              <TextBlock Text="KuCoin" FontSize="17" FontWeight="SemiBold" HorizontalAlignment="Center" />
+            </StackPanel>
+          </RadioButton>
+        </StackPanel>
+      </StackPanel>
 
-        <TextBlock Grid.Row="0" Grid.Column="2" Text="Category" VerticalAlignment="Center" />
-        <ComboBox Grid.Row="0" Grid.Column="3" HorizontalAlignment="Stretch"
-                  ItemsSource="{Binding CategoryModes}" SelectedItem="{Binding CategoryMode, Mode=TwoWay}" />
+      <!-- 2 Markets & symbols -->
+      <StackPanel IsVisible="{Binding IsMarketStep}">
+        <TextBlock Classes="lbl" Text="Market types" FontWeight="SemiBold" />
+        <StackPanel Orientation="Horizontal" Margin="0,0,0,14">
+          <CheckBox Content="Spot" Margin="0,0,22,8" IsChecked="{Binding IsSpot, Mode=TwoWay}" />
+          <CheckBox Content="Linear" Margin="0,0,22,8" IsChecked="{Binding IsLinear, Mode=TwoWay}" />
+          <CheckBox Content="Inverse" IsChecked="{Binding IsInverse, Mode=TwoWay}" />
+        </StackPanel>
 
-        <TextBlock Grid.Row="1" Grid.Column="0" Text="Year" VerticalAlignment="Center" />
-        <TextBox Grid.Row="1" Grid.Column="1" Text="{Binding Year, Mode=TwoWay}" />
+        <TextBlock Classes="lbl" Text="Symbols" FontWeight="SemiBold" />
+        <StackPanel Orientation="Horizontal">
+          <RadioButton GroupName="sym" Classes="seg" Content="Screen universe"
+                       IsChecked="{Binding IsScreenMode, Mode=TwoWay}" />
+          <RadioButton GroupName="sym" Classes="seg" Content="Specific symbols"
+                       IsChecked="{Binding IsExplicitMode, Mode=TwoWay}" />
+        </StackPanel>
 
-        <TextBlock Grid.Row="1" Grid.Column="2" Text="Month (yyyy-MM)" VerticalAlignment="Center" />
-        <TextBox Grid.Row="1" Grid.Column="3" Text="{Binding Month, Mode=TwoWay}" />
+        <StackPanel IsVisible="{Binding IsScreenMode}">
+          <StackPanel Orientation="Horizontal">
+            <RadioButton GroupName="preset" Classes="seg" Content="Broad"
+                         IsChecked="{Binding Preset, Converter={StaticResource Equals}, ConverterParameter=broad, Mode=TwoWay}" />
+            <RadioButton GroupName="preset" Classes="seg" Content="Balanced"
+                         IsChecked="{Binding Preset, Converter={StaticResource Equals}, ConverterParameter=balanced, Mode=TwoWay}" />
+            <RadioButton GroupName="preset" Classes="seg" Content="Strict"
+                         IsChecked="{Binding Preset, Converter={StaticResource Equals}, ConverterParameter=strict, Mode=TwoWay}" />
+          </StackPanel>
+          <CheckBox Content="Include TradFi" IsChecked="{Binding IncludeTradFi, Mode=TwoWay}" />
+        </StackPanel>
 
-        <TextBlock Grid.Row="2" Grid.Column="0" Text="From (yyyy-MM-dd)" VerticalAlignment="Center" />
-        <TextBox Grid.Row="2" Grid.Column="1" Text="{Binding FromDate, Mode=TwoWay}" />
+        <StackPanel IsVisible="{Binding IsExplicitMode}">
+          <TextBox Classes="field" Height="90" AcceptsReturn="True" TextWrapping="Wrap" VerticalContentAlignment="Top"
+                   Text="{Binding SymbolsText, Mode=TwoWay}" />
+          <TextBlock Classes="dim" Margin="0,6,0,0" Text="Comma- or space-separated, e.g. BTCUSDT, ETHUSDT SOLUSDT" />
+        </StackPanel>
+      </StackPanel>
 
-        <TextBlock Grid.Row="2" Grid.Column="2" Text="To (yyyy-MM-dd)" VerticalAlignment="Center" />
-        <TextBox Grid.Row="2" Grid.Column="3" Text="{Binding ToDate, Mode=TwoWay}" />
+      <!-- 3 Date range -->
+      <StackPanel IsVisible="{Binding IsPeriodStep}">
+        <StackPanel Orientation="Horizontal">
+          <RadioButton GroupName="dm" Classes="seg" Content="Year"
+                       IsChecked="{Binding PeriodMode, Converter={StaticResource Equals}, ConverterParameter=Year, Mode=TwoWay}" />
+          <RadioButton GroupName="dm" Classes="seg" Content="Month"
+                       IsChecked="{Binding PeriodMode, Converter={StaticResource Equals}, ConverterParameter=Month, Mode=TwoWay}" />
+          <RadioButton GroupName="dm" Classes="seg" Content="Range"
+                       IsChecked="{Binding PeriodMode, Converter={StaticResource Equals}, ConverterParameter=Range, Mode=TwoWay}" />
+          <RadioButton GroupName="dm" Classes="seg" Content="All"
+                       IsChecked="{Binding PeriodMode, Converter={StaticResource Equals}, ConverterParameter=All, Mode=TwoWay}" />
+        </StackPanel>
+        <StackPanel Margin="0,8,0,0">
+          <StackPanel Orientation="Horizontal" IsVisible="{Binding IsYearOrMonth}">
+            <StackPanel Margin="0,0,16,0">
+              <TextBlock Classes="lbl" Text="Year" />
+              <ComboBox Width="110" ItemsSource="{Binding YearOptions}" SelectedItem="{Binding Year, Mode=TwoWay}" />
+            </StackPanel>
+            <StackPanel IsVisible="{Binding IsMonthPeriod}">
+              <TextBlock Classes="lbl" Text="Month" />
+              <ComboBox Width="110" ItemsSource="{Binding MonthOptions}" SelectedItem="{Binding Month, Mode=TwoWay}" />
+            </StackPanel>
+          </StackPanel>
+          <StackPanel Orientation="Horizontal" IsVisible="{Binding IsRangePeriod}">
+            <StackPanel Margin="0,0,16,0">
+              <TextBlock Classes="lbl" Text="From (yyyy-MM-dd)" />
+              <TextBox Classes="field" Width="150" Text="{Binding FromDate, Mode=TwoWay}" />
+            </StackPanel>
+            <StackPanel>
+              <TextBlock Classes="lbl" Text="To (yyyy-MM-dd)" />
+              <TextBox Classes="field" Width="150" Text="{Binding ToDate, Mode=TwoWay}" />
+            </StackPanel>
+          </StackPanel>
+          <TextBlock Classes="dim" IsVisible="{Binding IsAllPeriod}"
+                     Text="All available history, clamped to each symbol's launch date." />
+        </StackPanel>
+        <TextBlock Classes="dim" Margin="0,22,0,0" Text="All dates are interpreted as UTC." />
+      </StackPanel>
 
-        <TextBlock Grid.Row="3" Grid.Column="0" Text="Symbols" VerticalAlignment="Center" />
-        <ComboBox Grid.Row="3" Grid.Column="1" HorizontalAlignment="Stretch"
-                  ItemsSource="{Binding SymbolModes}" SelectedItem="{Binding SymbolMode, Mode=TwoWay}" />
+      <!-- 4 Output & options -->
+      <StackPanel IsVisible="{Binding IsOptionsStep}">
+        <TextBlock Classes="lbl" Text="Output folder" />
+        <Grid Margin="0,0,0,14" ColumnDefinitions="*,Auto">
+          <TextBox Grid.Column="0" Classes="field" Text="{Binding OutputRoot, Mode=TwoWay}" />
+          <Button Grid.Column="1" Classes="btn" Content="Browse…" Margin="8,0,0,0" Command="{Binding BrowseCommand}" />
+        </Grid>
 
-        <TextBlock Grid.Row="3" Grid.Column="2" Text="Preset" VerticalAlignment="Center" />
-        <ComboBox Grid.Row="3" Grid.Column="3" HorizontalAlignment="Stretch" IsEnabled="{Binding IsScreenMode}"
-                  ItemsSource="{Binding Presets}" SelectedItem="{Binding Preset, Mode=TwoWay}" />
+        <TextBlock Classes="lbl" Text="Manifest" />
+        <TextBox Classes="field" IsReadOnly="True" Opacity="0.7" Margin="0,0,0,14" Text="{Binding DatabasePath}" />
 
-        <TextBlock Grid.Row="4" Grid.Column="0" Text="Symbol list" VerticalAlignment="Center" />
-        <TextBox Grid.Row="4" Grid.Column="1" Grid.ColumnSpan="3" IsEnabled="{Binding IsExplicitMode}"
-                 PlaceholderText="BTCUSDT, ETHUSDT, ..." Text="{Binding SymbolsText, Mode=TwoWay}" />
+        <TextBlock Classes="lbl" Text="Parallel workers" />
+        <TextBox Classes="field" Width="90" HorizontalAlignment="Left" Margin="0,0,0,14"
+                 Text="{Binding WorkersText, Mode=TwoWay}" />
 
-        <TextBlock Grid.Row="5" Grid.Column="0" Text="Output folder" VerticalAlignment="Center" />
-        <TextBox Grid.Row="5" Grid.Column="1" Grid.ColumnSpan="3" Text="{Binding OutputRoot, Mode=TwoWay}" />
+        <CheckBox Content="Include forming candle" IsChecked="{Binding IncludeForming, Mode=TwoWay}" />
+      </StackPanel>
+
+      <!-- 5 Review -->
+      <Grid IsVisible="{Binding IsSummaryStep}" RowDefinitions="*,Auto,Auto">
+        <TextBox Grid.Row="0" Classes="field" IsReadOnly="True" FontFamily="Consolas,Menlo,monospace"
+                 TextWrapping="Wrap" VerticalContentAlignment="Top" Text="{Binding SummaryText}" />
+        <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,12,0,10">
+          <Button Classes="btn" Content="Preview plan" Margin="0,0,8,0" Command="{Binding PreviewCommand}" />
+          <Button Classes="btn" Content="Validate existing output" Command="{Binding ValidateCommand}" />
+        </StackPanel>
+        <TextBlock Grid.Row="2" Classes="dim" Text="{Binding PlanSummary}" />
       </Grid>
-    </Border>
 
-    <Grid Grid.Row="2" ColumnDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,*" ColumnSpacing="10" Margin="0,0,0,12">
-      <Button Grid.Column="0" Content="Preview plan" Padding="14,6" Command="{Binding PreviewCommand}" />
-      <Button Grid.Column="1" Content="Start download" Padding="14,6" Command="{Binding StartCommand}" />
-      <Button Grid.Column="2" Content="Validate output" Padding="14,6" Command="{Binding ValidateCommand}" />
-      <Button Grid.Column="3" Content="Cancel" Padding="14,6" Command="{Binding CancelCommand}" />
-      <TextBlock Grid.Column="4" Text="Workers" VerticalAlignment="Center" Margin="12,0,0,0" />
-      <TextBox Grid.Column="5" Width="60" Text="{Binding WorkersText, Mode=TwoWay}" IsEnabled="{Binding CanEdit}" />
-      <CheckBox Grid.Column="6" Content="Include forming candle" Margin="12,0,0,0"
-                IsChecked="{Binding IncludeForming, Mode=TwoWay}" IsEnabled="{Binding CanEdit}" />
+      <!-- 6 Monitor -->
+      <Grid IsVisible="{Binding IsMonitorStep}" RowDefinitions="Auto,Auto,*,130">
+        <ProgressBar Grid.Row="0" Minimum="0" Maximum="100" Value="{Binding ProgressValue}" Margin="0,0,0,8" />
+        <Grid Grid.Row="1" ColumnDefinitions="*,Auto" Margin="0,0,0,10">
+          <TextBlock Grid.Column="0" Text="{Binding Status}" Foreground="White" VerticalAlignment="Center" TextWrapping="Wrap" />
+          <TextBlock Grid.Column="1" Text="{Binding CurrentSymbol}" Foreground="White" Opacity="0.6"
+                     VerticalAlignment="Center" FontFamily="Consolas,Menlo,monospace" />
+        </Grid>
+
+        <Border Grid.Row="2" Background="#1AFFFFFF" Margin="0,0,0,10">
+          <Grid RowDefinitions="Auto,*">
+            <Grid Grid.Row="0" ColumnDefinitions="90,120,*,100,90" Background="#33FFFFFF">
+              <TextBlock Grid.Column="0" Text="Category" Padding="8,5" Foreground="White" />
+              <TextBlock Grid.Column="1" Text="Symbol" Padding="8,5" Foreground="White" />
+              <TextBlock Grid.Column="2" Text="Period" Padding="8,5" Foreground="White" />
+              <TextBlock Grid.Column="3" Text="Status" Padding="8,5" Foreground="White" />
+              <TextBlock Grid.Column="4" Text="Rows" Padding="8,5" Foreground="White" />
+            </Grid>
+            <ListBox Grid.Row="1" ItemsSource="{Binding Rows}">
+              <ListBox.ItemTemplate>
+                <DataTemplate x:DataType="vm:ChunkProgressRow">
+                  <Grid ColumnDefinitions="90,120,*,100,90">
+                    <TextBlock Grid.Column="0" Text="{Binding Category}" />
+                    <TextBlock Grid.Column="1" Text="{Binding Symbol}" FontFamily="Consolas,Menlo,monospace" />
+                    <TextBlock Grid.Column="2" Text="{Binding Period}" />
+                    <TextBlock Grid.Column="3" Text="{Binding Status}" />
+                    <TextBlock Grid.Column="4" Text="{Binding RowsText}" />
+                  </Grid>
+                </DataTemplate>
+              </ListBox.ItemTemplate>
+            </ListBox>
+          </Grid>
+        </Border>
+
+        <Border Grid.Row="3" Background="#26FFFFFF" CornerRadius="7" Padding="9,7">
+          <ScrollViewer>
+            <ItemsControl ItemsSource="{Binding Logs}">
+              <ItemsControl.ItemTemplate>
+                <DataTemplate x:DataType="x:String">
+                  <TextBlock Text="{Binding}" FontFamily="Consolas,Menlo,monospace" FontSize="12"
+                             TextWrapping="Wrap" Foreground="White" Opacity="0.9" />
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+          </ScrollViewer>
+        </Border>
+      </Grid>
+
     </Grid>
 
-    <StackPanel Grid.Row="3" Spacing="6" Margin="0,0,0,12">
-      <ProgressBar Minimum="0" Maximum="100" Height="10" Value="{Binding ProgressValue}" />
-      <TextBlock Text="{Binding Status}" FontWeight="SemiBold" TextWrapping="Wrap" />
-      <TextBlock Text="{Binding PlanSummary}" Opacity="0.85" TextWrapping="Wrap"
-                 FontFamily="Consolas,Menlo,monospace" />
-    </StackPanel>
-
-    <Border Grid.Row="4" BorderBrush="#33000000" BorderThickness="1" CornerRadius="6">
-      <Grid RowDefinitions="Auto,*">
-        <Grid Grid.Row="0" ColumnDefinitions="*,90,90" Background="#14000000" Margin="0">
-          <TextBlock Grid.Column="0" Text="Chunk" Margin="10,6" FontWeight="SemiBold" />
-          <TextBlock Grid.Column="1" Text="Status" Margin="10,6" FontWeight="SemiBold" />
-          <TextBlock Grid.Column="2" Text="Rows" Margin="10,6" FontWeight="SemiBold" HorizontalAlignment="Right" />
-        </Grid>
-        <ListBox Grid.Row="1" ItemsSource="{Binding Rows}" Background="Transparent">
-          <ListBox.ItemTemplate>
-            <DataTemplate x:DataType="vm:ChunkProgressRow">
-              <Grid ColumnDefinitions="*,90,90">
-                <TextBlock Grid.Column="0" Text="{Binding ChunkId}" FontFamily="Consolas,Menlo,monospace" />
-                <TextBlock Grid.Column="1" Text="{Binding Status}" />
-                <TextBlock Grid.Column="2" Text="{Binding RowsText}" HorizontalAlignment="Right" />
-              </Grid>
-            </DataTemplate>
-          </ListBox.ItemTemplate>
-        </ListBox>
-      </Grid>
-    </Border>
+    <!-- Footer: validation message on the left, navigation on the right. -->
+    <Grid Grid.Row="2" Margin="0,16,0,0" ColumnDefinitions="*,Auto">
+      <TextBlock Grid.Column="0" Text="{Binding ErrorMessage}" Foreground="#FF6B6B" VerticalAlignment="Center" />
+      <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Right">
+        <Button Classes="btn" Content="Back" Margin="0,0,8,0" Command="{Binding BackCommand}"
+                IsVisible="{Binding ShowBack}" />
+        <Button Classes="btn primary" Content="{Binding NextLabel}" Command="{Binding PrimaryCommand}"
+                IsVisible="{Binding ShowNext}" />
+        <Button Classes="btn" Content="Cancel" Margin="0,0,8,0" Command="{Binding CancelCommand}"
+                IsVisible="{Binding ShowMonitorActions}" />
+        <Button Classes="btn primary" Content="New run" Command="{Binding RestartCommand}"
+                IsVisible="{Binding ShowMonitorActions}" />
+      </StackPanel>
+    </Grid>
 
   </Grid>
 </Window>

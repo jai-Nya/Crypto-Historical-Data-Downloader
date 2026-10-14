@@ -1,8 +1,162 @@
 <Application xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:conv="using:BybitDownloader.Gui.Converters"
              x:Class="BybitDownloader.Gui.App"
-             RequestedThemeVariant="Default">
+             RequestedThemeVariant="Dark">
+  <Application.Resources>
+    <conv:EqualsConverter x:Key="Equals" />
+    <conv:HexToBrushConverter x:Key="HexToBrush" />
+    <conv:StepDotOpacityConverter x:Key="DotOpacity" />
+  </Application.Resources>
+
+  <!-- ==========================================================================
+       Design ported from the DownloaderGui prototype: black canvas, white type,
+       translucent white surfaces, 7px controls / 16px exchange tiles, accent #0A84FF.
+       ========================================================================== -->
   <Application.Styles>
     <FluentTheme />
+
+    <Style Selector="TextBlock.lbl">
+      <Setter Property="Foreground" Value="White" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+      <Setter Property="Margin" Value="0,0,0,6" />
+    </Style>
+    <Style Selector="TextBlock.dim">
+      <Setter Property="Foreground" Value="White" />
+      <Setter Property="Opacity" Value="0.6" />
+      <Setter Property="TextWrapping" Value="Wrap" />
+    </Style>
+
+    <Style Selector="CheckBox">
+      <Setter Property="Foreground" Value="White" />
+      <Setter Property="FontSize" Value="13" />
+      <Setter Property="Margin" Value="0,0,0,8" />
+    </Style>
+
+    <Style Selector="ComboBox">
+      <Setter Property="Foreground" Value="White" />
+      <Setter Property="Background" Value="#26FFFFFF" />
+      <Setter Property="BorderThickness" Value="0" />
+      <Setter Property="CornerRadius" Value="7" />
+      <Setter Property="Padding" Value="9,7" />
+      <Setter Property="MinHeight" Value="32" />
+      <Setter Property="FontSize" Value="13" />
+    </Style>
+
+    <Style Selector="ProgressBar">
+      <Setter Property="Height" Value="8" />
+      <Setter Property="Foreground" Value="#0A84FF" />
+      <Setter Property="Background" Value="#26FFFFFF" />
+      <Setter Property="BorderThickness" Value="0" />
+      <Setter Property="CornerRadius" Value="4" />
+    </Style>
+
+    <Style Selector="ListBox">
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="BorderThickness" Value="0" />
+    </Style>
+    <Style Selector="ListBoxItem">
+      <Setter Property="Foreground" Value="White" />
+      <Setter Property="Padding" Value="8,5" />
+      <Setter Property="MinHeight" Value="0" />
+    </Style>
+
+    <!-- Buttons: translucent white pills; .primary is the blue accent. -->
+    <Style Selector="Button.btn">
+      <Setter Property="Foreground" Value="White" />
+      <Setter Property="Background" Value="#33FFFFFF" />
+      <Setter Property="Padding" Value="16,6" />
+      <Setter Property="FontSize" Value="13" />
+      <Setter Property="Cursor" Value="Hand" />
+      <Setter Property="HorizontalContentAlignment" Value="Center" />
+      <Setter Property="VerticalContentAlignment" Value="Center" />
+      <Setter Property="Template">
+        <ControlTemplate TargetType="Button">
+          <Border Background="{TemplateBinding Background}" CornerRadius="7" Padding="{TemplateBinding Padding}">
+            <ContentPresenter Content="{TemplateBinding Content}"
+                              ContentTemplate="{TemplateBinding ContentTemplate}"
+                              HorizontalAlignment="Center"
+                              VerticalAlignment="Center" />
+          </Border>
+        </ControlTemplate>
+      </Setter>
+    </Style>
+    <Style Selector="Button.btn:pointerover">
+      <Setter Property="Opacity" Value="0.85" />
+    </Style>
+    <Style Selector="Button.btn:disabled">
+      <Setter Property="Opacity" Value="0.35" />
+    </Style>
+    <Style Selector="Button.primary">
+      <Setter Property="Background" Value="#0A84FF" />
+    </Style>
+
+    <!-- Segmented options: translucent pill, blue when chosen. -->
+    <Style Selector="RadioButton.seg">
+      <Setter Property="Foreground" Value="White" />
+      <Setter Property="Background" Value="#26FFFFFF" />
+      <Setter Property="Padding" Value="16,6" />
+      <Setter Property="Margin" Value="0,0,6,8" />
+      <Setter Property="FontSize" Value="13" />
+      <Setter Property="Cursor" Value="Hand" />
+      <Setter Property="Template">
+        <ControlTemplate TargetType="RadioButton">
+          <Border Background="{TemplateBinding Background}" CornerRadius="7" Padding="{TemplateBinding Padding}">
+            <ContentPresenter Content="{TemplateBinding Content}"
+                              ContentTemplate="{TemplateBinding ContentTemplate}"
+                              HorizontalAlignment="Center"
+                              VerticalAlignment="Center" />
+          </Border>
+        </ControlTemplate>
+      </Setter>
+    </Style>
+    <Style Selector="RadioButton.seg:checked">
+      <Setter Property="Background" Value="#0A84FF" />
+    </Style>
+    <Style Selector="RadioButton.seg:pointerover">
+      <Setter Property="Opacity" Value="0.85" />
+    </Style>
+
+    <!-- Exchange tiles: light card, near-black when chosen. -->
+    <Style Selector="RadioButton.tile">
+      <Setter Property="Width" Value="180" />
+      <Setter Property="Height" Value="120" />
+      <Setter Property="Margin" Value="7" />
+      <Setter Property="Foreground" Value="Black" />
+      <Setter Property="Background" Value="#F2F2F7" />
+      <Setter Property="Cursor" Value="Hand" />
+      <Setter Property="Template">
+        <ControlTemplate TargetType="RadioButton">
+          <Border Background="{TemplateBinding Background}" CornerRadius="16">
+            <ContentPresenter Content="{TemplateBinding Content}"
+                              ContentTemplate="{TemplateBinding ContentTemplate}"
+                              HorizontalAlignment="Center"
+                              VerticalAlignment="Center" />
+          </Border>
+        </ControlTemplate>
+      </Setter>
+    </Style>
+    <Style Selector="RadioButton.tile:checked">
+      <Setter Property="Background" Value="#1C1C1E" />
+      <Setter Property="Foreground" Value="White" />
+    </Style>
+    <Style Selector="RadioButton.tile:pointerover">
+      <Setter Property="Opacity" Value="0.9" />
+    </Style>
+
+    <!-- Text fields: translucent white wells. -->
+    <Style Selector="TextBox.field">
+      <Setter Property="Foreground" Value="White" />
+      <Setter Property="CaretBrush" Value="White" />
+      <Setter Property="Background" Value="#26FFFFFF" />
+      <Setter Property="BorderThickness" Value="0" />
+      <Setter Property="CornerRadius" Value="7" />
+      <Setter Property="Padding" Value="9,7" />
+      <Setter Property="MinHeight" Value="32" />
+      <Setter Property="FontSize" Value="13" />
+    </Style>
+    <Style Selector="TextBox.field:focus">
+      <Setter Property="Background" Value="#33FFFFFF" />
+    </Style>
   </Application.Styles>
 </Application>

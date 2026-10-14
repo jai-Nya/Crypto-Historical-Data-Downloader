@@ -2,6 +2,7 @@ using System.Diagnostics;
 using BybitDownloader.Core.Api;
 using BybitDownloader.Core.Models;
 using BybitDownloader.Core.Planning;
+using BybitDownloader.Core.Telemetry;
 using BybitDownloader.Core.Validation;
 using BybitDownloader.Storage;
 
@@ -10,7 +11,10 @@ namespace BybitDownloader.Download;
 public sealed record OrchestratorOptions
 {
     /// <summary>Chunks processed concurrently. They share the injected client, hence one limiter/retry policy.</summary>
-    public int MaxParallelWorkers { get; init; } = 4;
+    public int MaxParallelWorkers { get; init; } = 8;
+
+    /// <summary>Request windows fetched concurrently within a single chunk (lets one chunk use the full rate).</summary>
+    public int MaxWindowConcurrency { get; init; } = 4;
 
     /// <summary>When true, a chunk already marked Done (with its file present) is not re-requested.</summary>
     public bool SkipCompleted { get; init; } = true;
@@ -30,25 +34,29 @@ public sealed record DownloadSummary(int Total, int Succeeded, int Skipped, int 
 
 /// <summary>
 /// Drives a <see cref="PlanResult"/> to completion: skips finished chunks, fans the rest across N workers
-/// (each chunk's request windows run sequentially), merges + validates the candles, writes Parquet atomically,
+/// (each chunk's request windows are fetched concurrently), merges + validates the candles, writes Parquet atomically,
 /// then records the outcome in the manifest so the run is resumable.
 /// </summary>
 public sealed class DownloadOrchestrator
 {
-    private readonly IBybitMarketData _market;
+    private readonly IExchangeMarketData _market;
     private readonly ICandleStore _store;
     private readonly IChunkManifest _manifest;
     private readonly OrchestratorOptions _options;
+    private readonly ITelemetry? _telemetry;
 
-    public DownloadOrchestrator(IBybitMarketData market, ICandleStore store, IChunkManifest manifest,
-        OrchestratorOptions? options = null)
+    public DownloadOrchestrator(IExchangeMarketData market, ICandleStore store, IChunkManifest manifest,
+        OrchestratorOptions? options = null, ITelemetry? telemetry = null)
     {
         _market = market ?? throw new ArgumentNullException(nameof(market));
         _store = store ?? throw new ArgumentNullException(nameof(store));
         _manifest = manifest ?? throw new ArgumentNullException(nameof(manifest));
         _options = options ?? new OrchestratorOptions();
+        _telemetry = telemetry;
         if (_options.MaxParallelWorkers < 1)
             throw new ArgumentException("MaxParallelWorkers must be >= 1.", nameof(options));
+        if (_options.MaxWindowConcurrency < 1)
+            throw new ArgumentException("MaxWindowConcurrency must be >= 1.", nameof(options));
     }
 
     public async Task<DownloadSummary> RunAsync(PlanResult plan, IProgress<DownloadProgress>? progress = null,
@@ -63,6 +71,8 @@ public sealed class DownloadOrchestrator
         var total = chunks.Count;
         var tally = new Tally();
         var sw = Stopwatch.StartNew();
+        _telemetry?.Report(new TelemetryEvent(TelemetryKind.Log, TelemetryLevel.Info,
+            $"Downloading {total} chunk(s) across {_options.MaxParallelWorkers} worker(s)."));
 
         if (total > 0)
         {
@@ -90,6 +100,7 @@ public sealed class DownloadOrchestrator
                         if (_options.FailFast) failFastCts.Cancel();
                     }
 
+                    ReportCompleted(outcome);
                     var completed = tally.Add(outcome);
                     progress?.Report(new DownloadProgress(completed, total, tally.Candles, outcome));
                 }).ConfigureAwait(false);
@@ -119,14 +130,27 @@ public sealed class DownloadOrchestrator
 
         _manifest.MarkPending(chunk);
 
-        var raw = new List<Candle>();
-        foreach (var window in DownloadPlanner.Windows(chunk))
+        _telemetry?.Report(new TelemetryEvent(TelemetryKind.ChunkStarted, TelemetryLevel.Info,
+            $"Starting {chunk.Symbol} {chunk.Year:D4}-{chunk.Month:D2}.",
+            ChunkId: chunk.Id, Symbol: chunk.Symbol, Category: chunk.Category));
+        using var scope = DownloadScope.Begin(chunk.Id, chunk.Symbol, chunk.Category);
+
+        var windows = DownloadPlanner.Windows(chunk).ToList();
+        var batches = new IReadOnlyList<Candle>[windows.Count];
+        var windowOptions = new ParallelOptions
         {
-            ct.ThrowIfCancellationRequested();
-            var batch = await _market.GetKlinesAsync(chunk.Category, chunk.Symbol, window.StartMs, window.EndMsInclusive, ct)
-                .ConfigureAwait(false);
-            raw.AddRange(batch);
-        }
+            MaxDegreeOfParallelism = _options.MaxWindowConcurrency,
+            CancellationToken = ct
+        };
+        await Parallel.ForEachAsync(Enumerable.Range(0, windows.Count), windowOptions, async (i, token) =>
+        {
+            var window = windows[i];
+            batches[i] = await _market.GetKlinesAsync(
+                chunk.Category, chunk.Symbol, window.StartMs, window.EndMsInclusive, token).ConfigureAwait(false);
+        }).ConfigureAwait(false);
+
+        var raw = new List<Candle>();
+        foreach (var batch in batches) raw.AddRange(batch);
 
         var validation = CandleValidator.Validate(raw, chunk.StartMs, chunk.EndMs);
         if (validation.Candles.Count == 0)
@@ -140,6 +164,29 @@ public sealed class DownloadOrchestrator
         var issues = validation.Issues.Count == 0 ? null : string.Join("; ", validation.Issues);
         _manifest.MarkDone(chunk, validation.Candles.Count, validation.ExpectedCandles, validation.Coverage, path, issues);
         return new ChunkOutcome(chunk.Id, ChunkStatus.Done, false, validation.Candles.Count, validation.Coverage, null);
+    }
+
+    private void ReportCompleted(ChunkOutcome outcome)
+    {
+        if (_telemetry is null) return;
+
+        var failed = outcome.Result != ChunkStatus.Done;
+        var level = failed ? TelemetryLevel.Error : TelemetryLevel.Info;
+        var message = failed
+            ? $"Failed {ChunkIdTail(outcome.ChunkId)}: {outcome.Error}"
+            : outcome.Skipped
+                ? $"Skipped {ChunkIdTail(outcome.ChunkId)} (already complete)."
+                : $"Completed {ChunkIdTail(outcome.ChunkId)} ({outcome.Rows} rows, {outcome.Coverage:P0}).";
+
+        _telemetry.Report(new TelemetryEvent(TelemetryKind.ChunkCompleted, level, message,
+            ChunkId: outcome.ChunkId, Rows: outcome.Rows, Skipped: outcome.Skipped, Failed: failed));
+    }
+
+    private static string ChunkIdTail(string chunkId)
+    {
+        // Chunk id is "{exchange}/{category}/{symbol}/{yyyyMM}"; surface "symbol yyyyMM" for readability.
+        var parts = chunkId.Split('/');
+        return parts.Length >= 2 ? $"{parts[^2]} {parts[^1]}" : chunkId;
     }
 
     private void EnsureDistinctTargets(IReadOnlyList<DownloadChunk> chunks)

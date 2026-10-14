@@ -1,5 +1,7 @@
+using System.Net;
 using BybitDownloader.Core.Api;
-using BybitDownloader.Core.Resilience;
+using BybitDownloader.Core.Models;
+using BybitDownloader.Core.Telemetry;
 using BybitDownloader.Download;
 using BybitDownloader.Storage;
 
@@ -16,45 +18,56 @@ public interface IDownloadService
 
     /// <summary>Runs the job end to end, opening the Parquet store and SQLite manifest under the given paths.</summary>
     Task<DownloadJobResult> RunAsync(DownloadJob job, string outputRoot, string databasePath,
-        IProgress<DownloadProgress>? progress, CancellationToken ct);
+        IProgress<DownloadProgress>? progress, CancellationToken ct, ITelemetry? telemetry = null);
 
     /// <summary>Re-reads every Parquet file under the output root and checks integrity + completeness (offline).</summary>
     Task<ValidationSummary> ValidateAsync(string outputRoot, string databasePath, CancellationToken ct);
 }
 
-/// <summary>Owns the single long-lived HttpClient and the shared limiter/retry policy.</summary>
+/// <summary>Owns the single long-lived HttpClient; builds the exchange adapter for each run from the job.</summary>
 public sealed class DownloadService : IDownloadService, IDisposable
 {
     private readonly HttpClient _http;
-    private readonly IBybitMarketData _market;
+    private readonly IExchangeMarketData? _injectedMarket;
 
     public DownloadService() : this(null) { }
 
-    public DownloadService(IBybitMarketData? market)
+    public DownloadService(IExchangeMarketData? market)
     {
         if (market is null)
         {
-            _http = new HttpClient { BaseAddress = new Uri(BybitApiClient.DefaultBaseUrl) };
-            _market = new BybitApiClient(
-                _http, new AdaptiveRateLimiter(new RateLimiterOptions()), new RetryPolicy(new RetryOptions()));
+            _http = new HttpClient(new SocketsHttpHandler { AutomaticDecompression = DecompressionMethods.All });
+            _injectedMarket = null;
         }
         else
         {
             _http = new HttpClient();
-            _market = market;
+            _injectedMarket = market;
         }
     }
 
+    private IExchangeMarketData MarketFor(DownloadJob job, ITelemetry? telemetry = null) =>
+        MarketFor(job.Exchange, telemetry);
+    private IExchangeMarketData MarketFor(Exchange exchange, ITelemetry? telemetry = null)
+    {
+        if (_injectedMarket is not null)
+        {
+            if (telemetry is not null && _injectedMarket is ExchangeHttpClient injected) injected.Telemetry = telemetry;
+            return _injectedMarket;
+        }
+        return ExchangeClientFactory.Create(exchange, _http, telemetry);
+    }
+
     public Task<DownloadJobPlan> PlanAsync(DownloadJob job, CancellationToken ct) =>
-        DownloadJobRunner.ForPlanning(_market).PlanAsync(job, ct);
+        DownloadJobRunner.ForPlanning(MarketFor(job)).PlanAsync(job, ct);
 
     public async Task<DownloadJobResult> RunAsync(DownloadJob job, string outputRoot, string databasePath,
-        IProgress<DownloadProgress>? progress, CancellationToken ct)
+        IProgress<DownloadProgress>? progress, CancellationToken ct, ITelemetry? telemetry = null)
     {
         using var manifest = new SqliteChunkManifest(databasePath);
         var store = new ParquetCandleStore(outputRoot);
-        var runner = new DownloadJobRunner(_market, store, manifest);
-        return await runner.RunAsync(job, progress, ct).ConfigureAwait(false);
+        var runner = new DownloadJobRunner(MarketFor(job, telemetry), store, manifest);
+        return await runner.RunAsync(job, progress, ct, telemetry).ConfigureAwait(false);
     }
 
     public async Task<ValidationSummary> ValidateAsync(string outputRoot, string databasePath, CancellationToken ct)

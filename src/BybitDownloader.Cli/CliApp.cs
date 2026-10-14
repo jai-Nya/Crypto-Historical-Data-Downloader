@@ -1,6 +1,6 @@
+using System.Net;
 using BybitDownloader.Core.Api;
 using BybitDownloader.Core.Planning;
-using BybitDownloader.Core.Resilience;
 using BybitDownloader.Download;
 using BybitDownloader.Storage;
 
@@ -47,13 +47,15 @@ public static class CliApp
         var o = parsed.Options!;
         try
         {
-            using var http = new HttpClient { BaseAddress = new Uri(BybitApiClient.DefaultBaseUrl) };
-            var limiter = new AdaptiveRateLimiter(new RateLimiterOptions());
-            var retry = new RetryPolicy(new RetryOptions());
-            var client = new BybitApiClient(http, limiter, retry);
+            using var http = new HttpClient(new SocketsHttpHandler { AutomaticDecompression = DecompressionMethods.All })
+            {
+                BaseAddress = new Uri(ExchangeProfiles.Get(o.Exchange).DefaultBaseUrl)
+            };
+            var client = ExchangeClientFactory.Create(o.Exchange, http);
 
             var job = new DownloadJob
             {
+                Exchange = o.Exchange,
                 Categories = o.Categories,
                 ScreenUniverse = o.Screen,
                 Symbols = o.Symbols,

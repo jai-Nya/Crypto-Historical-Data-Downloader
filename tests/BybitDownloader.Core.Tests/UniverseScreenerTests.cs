@@ -22,7 +22,7 @@ public class UniverseScreenerTests
     private static IReadOnlyList<Candle> Flat(int count) =>
         Enumerable.Range(0, count).Select(i => C(B + i * M, 100, 100, 100, 100)).ToList();
 
-    private sealed class FakeMarket : IBybitMarketData
+    private sealed class FakeMarket : IExchangeMarketData
     {
         public readonly Dictionary<MarketCategory, List<Instrument>> Instruments = new();
         public readonly Dictionary<MarketCategory, List<Ticker>> Tickers = new();
@@ -38,7 +38,7 @@ public class UniverseScreenerTests
         public Task<IReadOnlyList<Candle>> GetKlinesAsync(
             MarketCategory category, string symbol, long startMs, long endMsInclusive, CancellationToken ct)
         {
-            KlineCalls.Add((category, symbol, startMs, endMsInclusive));
+            lock (KlineCalls) KlineCalls.Add((category, symbol, startMs, endMsInclusive));
             return Task.FromResult(Klines(category, symbol, startMs, endMsInclusive));
         }
     }
@@ -76,6 +76,22 @@ public class UniverseScreenerTests
         Assert.Equal(1_585_526_400_000, only.LaunchTimeMs);
         Assert.Equal("USDT", only.Metrics.Currency);
         Assert.Equal(2, res.InstrumentResults.Count);
+    }
+
+    [Fact]
+    public async Task Screen_excludes_tradfi_by_default()
+    {
+        var m = new FakeMarket();
+        m.Instruments[MarketCategory.Linear] = [Inst("AAAUSDT"), Inst("AAPLUSDT", symbolType: "stock")];
+        m.Tickers[MarketCategory.Linear] = [Tick("AAAUSDT"), Tick("AAPLUSDT")];
+
+        var res = await new UniverseScreener(m).ScreenAsync(
+            new UniverseScreenOptions { Categories = [MarketCategory.Linear] }, CancellationToken.None);
+
+        Assert.Equal("AAAUSDT", Assert.Single(res.Selected).Symbol);
+        var tradfi = res.InstrumentResults.Single(r => r.Symbol == "AAPLUSDT");
+        Assert.False(tradfi.IsEligible);
+        Assert.Contains(tradfi.Reasons, x => x.Contains("TradFi", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]

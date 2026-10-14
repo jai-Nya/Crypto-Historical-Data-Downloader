@@ -2,13 +2,15 @@ namespace BybitDownloader.Core.Resilience;
 
 public sealed record RateLimiterOptions
 {
-    // CONSERVATIVE defaults. Verify Bybit's current limits at
+    // Public /v5/market/* traffic is bounded by the IP limit of 600 requests / 5s (~120 req/s) across
+    // api.bybit.com. We cap well below that (Max = 60, ~50% headroom) because exceeding it triggers a
+    // hard 403 with a ~10-minute IP ban. Verify current limits at
     // https://bybit-exchange.github.io/docs/v5/rate-limit before raising MaxRatePerSecond.
-    public double InitialRatePerSecond { get; init; } = 5;
+    public double InitialRatePerSecond { get; init; } = 20;
     public double MinRatePerSecond { get; init; } = 0.5;
-    public double MaxRatePerSecond { get; init; } = 20;
-    public double IncreaseStep { get; init; } = 0.5;
-    public int SuccessesBeforeIncrease { get; init; } = 50;
+    public double MaxRatePerSecond { get; init; } = 60;
+    public double IncreaseStep { get; init; } = 5;
+    public int SuccessesBeforeIncrease { get; init; } = 10;
     public double BackoffFactor { get; init; } = 0.5;
     public double LowCapacityFraction { get; init; } = 0.2;
     public TimeSpan DefaultBlock { get; init; } = TimeSpan.FromSeconds(2);

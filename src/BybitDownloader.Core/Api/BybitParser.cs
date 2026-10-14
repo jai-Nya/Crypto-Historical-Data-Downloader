@@ -29,7 +29,8 @@ public static class BybitParser
                     symbol, category,
                     Str(e, "contractType") ?? "", Str(e, "status") ?? "",
                     Str(e, "baseCoin") ?? "", Str(e, "quoteCoin") ?? "", Str(e, "settleCoin") ?? "",
-                    LongProp(e, "launchTime"), tick));
+                    LongProp(e, "launchTime"), tick,
+                    Str(e, "symbolType") ?? "", Str(e, "marketRegion") ?? ""));
             }
         }
         var cursor = Str(result, "nextPageCursor");

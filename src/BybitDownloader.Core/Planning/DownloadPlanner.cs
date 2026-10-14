@@ -1,3 +1,4 @@
+using BybitDownloader.Core.Api;
 using BybitDownloader.Core.Models;
 
 namespace BybitDownloader.Core.Planning;
@@ -82,12 +83,14 @@ public static class PeriodSelector
 }
 
 /// <summary>A month-partition slice of one symbol's request. End is exclusive. Id is deterministic and stable.</summary>
-public sealed record DownloadChunk(MarketCategory Category, string Symbol, int Year, int Month, long StartMs, long EndMs)
+public sealed record DownloadChunk(
+    MarketCategory Category, string Symbol, int Year, int Month, long StartMs, long EndMs,
+    Exchange Exchange = Exchange.Bybit)
 {
     // Deliberately keyed by month only (not the timestamps): a still-forming month is re-planned with a later
     // end on every run, and an id that embedded the end would create a new manifest row each time instead of
     // updating the one for that month.
-    public string Id => $"{Category.ToApiString()}/{Symbol}/{Year:D4}{Month:D2}";
+    public string Id => $"{Exchange.ToSlug()}/{Category.ToApiString()}/{Symbol}/{Year:D4}{Month:D2}";
     public long CandleCount => (EndMs - StartMs) / DownloadPlanner.MinuteMs;
 }
 
@@ -111,7 +114,8 @@ public static class DownloadPlanner
 
     public static PlanResult Plan(
         MarketCategory category, string symbol, long? launchTimeMs,
-        IEnumerable<UtcRange> ranges, DateTimeOffset now, bool includeFormingCandle = false)
+        IEnumerable<UtcRange> ranges, DateTimeOffset now, bool includeFormingCandle = false,
+        Exchange exchange = Exchange.Bybit)
     {
         var latestEnd = FloorMinute(now.ToUnixTimeMilliseconds()) + (includeFormingCandle ? MinuteMs : 0);
         long? launch = launchTimeMs is { } l ? FloorMinute(l) : null;
@@ -140,41 +144,43 @@ public static class DownloadPlanner
                 var next = monthStart.AddMonths(1);
                 var cs = Math.Max(s, monthStart.ToUnixTimeMilliseconds());
                 var ce = Math.Min(e, next.ToUnixTimeMilliseconds());
-                if (cs < ce) chunks.Add(new DownloadChunk(category, symbol, monthStart.Year, monthStart.Month, cs, ce));
+                if (cs < ce) chunks.Add(new DownloadChunk(category, symbol, monthStart.Year, monthStart.Month, cs, ce, exchange));
                 monthStart = next;
             }
         }
         return new PlanResult(chunks, unavailable);
     }
 
-    /// <summary>Contiguous, non-overlapping request windows of at most 1000 candles covering the chunk exactly.</summary>
-    public static IEnumerable<RequestWindow> Windows(DownloadChunk chunk) => Windows(chunk.StartMs, chunk.EndMs);
+    /// <summary>Contiguous, non-overlapping request windows sized by the chunk's exchange/category, covering it exactly.</summary>
+    public static IEnumerable<RequestWindow> Windows(DownloadChunk chunk) =>
+        Windows(chunk.StartMs, chunk.EndMs, ExchangeProfiles.Get(chunk.Exchange).MaxCandlesPerRequest(chunk.Category));
 
     /// <summary>Same as <see cref="Windows(DownloadChunk)"/> but for a half-open [start, endExclusive) range.</summary>
-    public static IEnumerable<RequestWindow> Windows(long startMs, long endMsExclusive)
+    public static IEnumerable<RequestWindow> Windows(long startMs, long endMsExclusive, int maxCandlesPerRequest = MaxCandlesPerRequest)
     {
         var s = startMs;
         while (s < endMsExclusive)
         {
-            var e = Math.Min(s + (MaxCandlesPerRequest - 1) * MinuteMs, endMsExclusive - MinuteMs);
+            var e = Math.Min(s + (maxCandlesPerRequest - 1) * MinuteMs, endMsExclusive - MinuteMs);
             yield return new RequestWindow(s, e);
             s = e + MinuteMs;
         }
     }
 
-    /// <summary>Plans every selected symbol into one combined result. Duplicate (category, symbol) pairs are ignored.</summary>
+    /// <summary>Plans every selected symbol into one combined result. Duplicate (exchange, category, symbol) triples are ignored.</summary>
     public static PlanResult PlanUniverse(
         IEnumerable<(MarketCategory Category, string Symbol, long? LaunchTimeMs)> symbols,
-        IEnumerable<UtcRange> ranges, DateTimeOffset now, bool includeFormingCandle = false)
+        IEnumerable<UtcRange> ranges, DateTimeOffset now, bool includeFormingCandle = false,
+        Exchange exchange = Exchange.Bybit)
     {
         var rangeList = ranges as IReadOnlyList<UtcRange> ?? ranges.ToList();
         var chunks = new List<DownloadChunk>();
         var unavailable = new List<UtcRange>();
-        var seen = new HashSet<(MarketCategory, string)>();
+        var seen = new HashSet<(Exchange, MarketCategory, string)>();
         foreach (var (category, symbol, launch) in symbols)
         {
-            if (!seen.Add((category, symbol))) continue;
-            var plan = Plan(category, symbol, launch, rangeList, now, includeFormingCandle);
+            if (!seen.Add((exchange, category, symbol))) continue;
+            var plan = Plan(category, symbol, launch, rangeList, now, includeFormingCandle, exchange);
             chunks.AddRange(plan.Chunks);
             unavailable.AddRange(plan.UnavailableBeforeLaunch);
         }
@@ -188,7 +194,8 @@ public static class DownloadPlanner
         {
             n++;
             candles += c.CandleCount;
-            requests += (c.CandleCount + MaxCandlesPerRequest - 1) / MaxCandlesPerRequest;
+            var max = ExchangeProfiles.Get(c.Exchange).MaxCandlesPerRequest(c.Category);
+            requests += (c.CandleCount + max - 1) / max;
         }
         return new Workload(n, candles, requests);
     }

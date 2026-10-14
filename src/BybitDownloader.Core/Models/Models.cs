@@ -1,15 +1,27 @@
 namespace BybitDownloader.Core.Models;
 
-public enum MarketCategory { Linear, Inverse }
+public enum MarketCategory { Spot, Linear, Inverse }
 
 public static class MarketCategoryExtensions
 {
     public static string ToApiString(this MarketCategory c) => c switch
     {
+        MarketCategory.Spot => "spot",
         MarketCategory.Linear => "linear",
         MarketCategory.Inverse => "inverse",
         _ => throw new ArgumentOutOfRangeException(nameof(c))
     };
+
+    public static bool TryParse(string value, out MarketCategory category)
+    {
+        switch (value?.Trim().ToLowerInvariant())
+        {
+            case "spot": category = MarketCategory.Spot; return true;
+            case "linear": category = MarketCategory.Linear; return true;
+            case "inverse": category = MarketCategory.Inverse; return true;
+            default: category = default; return false;
+        }
+    }
 }
 
 /// <summary>One 1-minute candle. Timestamp = candle OPEN time, Unix ms UTC. Semantics follow Bybit's kline list.</summary>
@@ -25,10 +37,23 @@ public sealed record Instrument(
     string QuoteCoin,
     string SettleCoin,
     long? LaunchTimeMs,
-    decimal? TickSize)
+    decimal? TickSize,
+    string SymbolType = "",
+    string MarketRegion = "")
 {
     public bool IsPerpetual => ContractType is "LinearPerpetual" or "InversePerpetual";
     public bool IsTrading => Status == "Trading";
+
+    /// <summary>
+    /// True for TradFi contracts (stocks, commodities, forex, ETFs). Normal crypto perpetuals report an
+    /// empty <see cref="SymbolType"/>; TradFi contracts also carry a non-empty <see cref="MarketRegion"/>.
+    /// "innovation" is a crypto listing zone and is NOT TradFi.
+    /// </summary>
+    public bool IsTradFi =>
+        !string.IsNullOrEmpty(MarketRegion) || TradFiSymbolTypes.Contains(SymbolType);
+
+    private static readonly HashSet<string> TradFiSymbolTypes =
+        new(StringComparer.OrdinalIgnoreCase) { "stock", "commodity", "forex", "ETF" };
 }
 
 public sealed record Ticker(

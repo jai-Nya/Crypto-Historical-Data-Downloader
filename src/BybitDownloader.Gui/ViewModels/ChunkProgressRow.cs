@@ -4,6 +4,7 @@ public sealed class ChunkProgressRow : ObservableObject
 {
     private string _status;
     private long _rows;
+    private int _retries;
 
     public ChunkProgressRow(string chunkId, string status, long rows)
     {
@@ -13,6 +14,15 @@ public sealed class ChunkProgressRow : ObservableObject
     }
 
     public string ChunkId { get; }
+
+    /// <summary>Symbol parsed from the chunk id ("{exchange}/{category}/{symbol}/{yyyyMM}").</summary>
+    public string Symbol => Segment(2);
+
+    /// <summary>Category parsed from the chunk id.</summary>
+    public string Category => Segment(1);
+
+    /// <summary>Year-month parsed from the chunk id.</summary>
+    public string Period => Segment(3);
 
     public string Status
     {
@@ -29,5 +39,21 @@ public sealed class ChunkProgressRow : ObservableObject
         }
     }
 
+    public int Retries
+    {
+        get => _retries;
+        set
+        {
+            if (SetProperty(ref _retries, value)) OnPropertyChanged(nameof(RetriesText));
+        }
+    }
+
     public string RowsText => _rows.ToString("N0");
+    public string RetriesText => _retries == 0 ? "" : _retries.ToString();
+
+    private string Segment(int index)
+    {
+        var parts = ChunkId.Split('/');
+        return index < parts.Length ? parts[index] : "";
+    }
 }

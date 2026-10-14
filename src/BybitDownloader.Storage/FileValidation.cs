@@ -32,9 +32,10 @@ public sealed record FileValidationReport(
     long MissingMinutes,
     bool ManifestRecorded,
     FileValidationStatus Status,
-    IReadOnlyList<string> Issues)
+    IReadOnlyList<string> Issues,
+    Exchange Exchange = Exchange.Bybit)
 {
-    public string Label => $"{Category}/{Symbol}/{Year:D4}-{Month:D2}";
+    public string Label => $"{Exchange.ToSlug()}/{Category}/{Symbol}/{Year:D4}-{Month:D2}";
 }
 
 public sealed record ValidationSummary(
@@ -71,7 +72,7 @@ public static class FileValidationAnalyzer
     public static FileValidationReport Analyze(
         string path, string category, string symbol, int year, int month,
         IReadOnlyList<Candle> candles, long expectedCandles, long windowStartMs, long windowEndMs,
-        ChunkRecord? record)
+        ChunkRecord? record, Exchange exchange = Exchange.Bybit)
     {
         int misaligned = 0, outOfRange = 0, duplicates = 0, outOfOrder = 0, insane = 0, gapCount = 0;
         long missing = 0, accepted = 0, firstMs = 0, lastMs = 0, prev = long.MinValue;
@@ -141,7 +142,7 @@ public static class FileValidationAnalyzer
         return new FileValidationReport(
             path, category, symbol, year, month, accepted, expectedCandles, coverage,
             firstMs, lastMs, misaligned, outOfRange, duplicates, outOfOrder, insane, gapCount, missing,
-            manifestRecorded, status, issues);
+            manifestRecorded, status, issues, exchange);
     }
 }
 
@@ -172,23 +173,23 @@ public sealed class CandleFileValidator
         var records = BuildRecordIndex();
 
         var files = new List<FileValidationReport>();
-        foreach (var (path, category, symbol, year, month) in Discover(options))
+        foreach (var (path, exchange, category, symbol, year, month) in Discover(options))
         {
             ct.ThrowIfCancellationRequested();
-            records.TryGetValue(Key(category, symbol, year, month), out var record);
+            records.TryGetValue(Key(exchange, category, symbol, year, month), out var record);
             var (startMs, endMs, expected) = ExpectedWindow(year, month, record, at);
 
             try
             {
                 var candles = await _store.ReadAsync(path, ct).ConfigureAwait(false);
                 files.Add(FileValidationAnalyzer.Analyze(
-                    path, category, symbol, year, month, candles, expected, startMs, endMs, record));
+                    path, category, symbol, year, month, candles, expected, startMs, endMs, record, exchange));
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
                 files.Add(new FileValidationReport(
                     path, category, symbol, year, month, 0, expected, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-                    record is not null, FileValidationStatus.Errors, [$"unreadable: {ex.Message}"]));
+                    record is not null, FileValidationStatus.Errors, [$"unreadable: {ex.Message}"], exchange));
             }
         }
 
@@ -206,10 +207,10 @@ public sealed class CandleFileValidator
                     continue;
                 }
                 if (r.Status != ChunkStatus.Done) continue;
-                var path = r.FilePath ?? _store.GetPath(ParseCategory(r.Category), r.Symbol, r.Year, r.Month);
+                var path = r.FilePath ?? _store.GetPath(r.Exchange, ParseCategory(r.Category), r.Symbol, r.Year, r.Month);
                 if (!File.Exists(path))
                 {
-                    var label = $"{r.Category}/{r.Symbol}/{r.Year:D4}-{r.Month:D2}";
+                    var label = $"{r.Exchange.ToSlug()}/{r.Category}/{r.Symbol}/{r.Year:D4}-{r.Month:D2}";
                     if (missingSeen.Add(label)) missing.Add(label);
                 }
             }
@@ -228,7 +229,7 @@ public sealed class CandleFileValidator
             failed);
     }
 
-    public IEnumerable<(string Path, string Category, string Symbol, int Year, int Month)> Discover(
+    public IEnumerable<(string Path, Exchange Exchange, string Category, string Symbol, int Year, int Month)> Discover(
         FileValidationOptions? options = null)
     {
         options ??= new FileValidationOptions();
@@ -239,15 +240,26 @@ public sealed class CandleFileValidator
             var rel = Path.GetRelativePath(_root, path);
             var segs = rel.Split([Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar],
                 StringSplitOptions.RemoveEmptyEntries);
-            if (segs.Length < 3) continue;
 
-            var category = segs[0];
+            // New layout: {exchange}/{category}/{symbol}/file. Legacy layout: {category}/{symbol}/file (exchange defaults to bybit).
+            Exchange exchange;
+            int categoryIndex;
+            if (segs.Length >= 1 && ExchangeExtensions.TryFromSlug(segs[0], out exchange))
+                categoryIndex = 1;
+            else
+            {
+                exchange = Exchange.Bybit;
+                categoryIndex = 0;
+            }
+            if (segs.Length <= categoryIndex + 2) continue;
+
+            var category = segs[categoryIndex];
             var symbol = segs[^2];
             if (!TryParseMonth(Path.GetFileNameWithoutExtension(segs[^1]), out var year, out var month)) continue;
             if (options.Category is { } cf && !string.Equals(cf, category, StringComparison.OrdinalIgnoreCase)) continue;
             if (options.Symbol is { } sf && !string.Equals(sf, symbol, StringComparison.OrdinalIgnoreCase)) continue;
 
-            yield return (Path.GetFullPath(path), category, symbol, year, month);
+            yield return (Path.GetFullPath(path), exchange, category, symbol, year, month);
         }
     }
 
@@ -258,7 +270,7 @@ public sealed class CandleFileValidator
 
         foreach (var r in _manifest.GetAll())
         {
-            var key = Key(r.Category, r.Symbol, r.Year, r.Month);
+            var key = Key(r.Exchange, r.Category, r.Symbol, r.Year, r.Month);
             if (!map.TryGetValue(key, out var existing) || Prefer(r, existing))
                 map[key] = r;
         }
@@ -291,13 +303,11 @@ public sealed class CandleFileValidator
         return (start.ToUnixTimeMilliseconds(), end.ToUnixTimeMilliseconds(), expected);
     }
 
-    private static string Key(string category, string symbol, int year, int month) =>
-        $"{category}|{symbol}|{year:D4}{month:D2}";
+    private static string Key(Exchange exchange, string category, string symbol, int year, int month) =>
+        $"{exchange.ToSlug()}|{category}|{symbol}|{year:D4}{month:D2}";
 
     private static MarketCategory ParseCategory(string value) =>
-        string.Equals(value, "inverse", StringComparison.OrdinalIgnoreCase)
-            ? MarketCategory.Inverse
-            : MarketCategory.Linear;
+        MarketCategoryExtensions.TryParse(value, out var c) ? c : MarketCategory.Linear;
 
     private static bool TryParseMonth(string name, out int year, out int month)
     {

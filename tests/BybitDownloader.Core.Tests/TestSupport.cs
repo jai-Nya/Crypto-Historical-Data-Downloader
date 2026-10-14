@@ -1,6 +1,17 @@
 using BybitDownloader.Core.Models;
+using BybitDownloader.Core.Telemetry;
 
 namespace BybitDownloader.Core.Tests;
+
+/// <summary>Thread-safe telemetry sink that records every event, for assertions.</summary>
+public sealed class CollectingTelemetry : ITelemetry
+{
+    private readonly object _l = new();
+    private readonly List<TelemetryEvent> _events = new();
+
+    public IReadOnlyList<TelemetryEvent> Events { get { lock (_l) return _events.ToList(); } }
+    public void Report(TelemetryEvent evt) { lock (_l) _events.Add(evt); }
+}
 
 /// <summary>Virtual clock: Delay advances time instantly, so no test ever really sleeps.</summary>
 public sealed class VirtualClock
@@ -36,7 +47,7 @@ public static class Fx
         $$"""{"retCode":{{code}},"retMsg":"{{msg}}","result":{},"retExtInfo":{},"time":1}""";
 
     public static Instrument Inst(string symbol = "BTCUSDT", string type = "LinearPerpetual", string status = "Trading",
-        MarketCategory cat = MarketCategory.Linear) =>
+        MarketCategory cat = MarketCategory.Linear, string symbolType = "", string marketRegion = "") =>
         new(symbol, cat, type, status, "BTC", cat == MarketCategory.Linear ? "USDT" : "USD",
-            cat == MarketCategory.Linear ? "USDT" : "BTC", 1_585_526_400_000, 0.1m);
+            cat == MarketCategory.Linear ? "USDT" : "BTC", 1_585_526_400_000, 0.1m, symbolType, marketRegion);
 }

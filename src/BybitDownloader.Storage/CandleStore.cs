@@ -8,6 +8,7 @@ namespace BybitDownloader.Storage;
 /// <summary>Persists validated candle sets and resolves their file locations.</summary>
 public interface ICandleStore
 {
+    string GetPath(Exchange exchange, MarketCategory category, string symbol, int year, int month);
     string GetPath(MarketCategory category, string symbol, int year, int month);
     string GetPath(DownloadChunk chunk);
     bool Exists(string path);
@@ -16,7 +17,7 @@ public interface ICandleStore
 }
 
 /// <summary>
-/// One Parquet file per symbol-month: {root}/{category}/{symbol}/{yyyy-MM}.parquet.
+/// One Parquet file per symbol-month: {root}/{exchange}/{category}/{symbol}/{yyyy-MM}.parquet.
 /// Writes are atomic: a uniquely-named temp file is fully written, flushed, then renamed over the target.
 /// </summary>
 public sealed class ParquetCandleStore : ICandleStore
@@ -41,11 +42,15 @@ public sealed class ParquetCandleStore : ICandleStore
 
     public string RootDirectory { get; }
 
+    public string GetPath(Exchange exchange, MarketCategory category, string symbol, int year, int month) =>
+        Path.Combine(RootDirectory, exchange.ToSlug(), category.ToApiString(), Sanitize(symbol), $"{year:D4}-{month:D2}.parquet");
+
+    /// <summary>Convenience overload resolving the Bybit layout ({root}/bybit/...).</summary>
     public string GetPath(MarketCategory category, string symbol, int year, int month) =>
-        Path.Combine(RootDirectory, category.ToApiString(), Sanitize(symbol), $"{year:D4}-{month:D2}.parquet");
+        GetPath(Exchange.Bybit, category, symbol, year, month);
 
     public string GetPath(DownloadChunk chunk) =>
-        GetPath(chunk.Category, chunk.Symbol, chunk.Year, chunk.Month);
+        GetPath(chunk.Exchange, chunk.Category, chunk.Symbol, chunk.Year, chunk.Month);
 
     public bool Exists(string path) => File.Exists(path);
 

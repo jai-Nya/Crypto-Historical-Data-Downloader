@@ -179,7 +179,7 @@ public class ChunkManifestTests : IDisposable
         m.Initialize();
 
         var r = Assert.Single(m.GetAll());
-        Assert.Equal("linear/BTCUSDT/202610", r.ChunkId);
+        Assert.Equal("bybit/linear/BTCUSDT/202610", r.ChunkId);
         Assert.Equal(1791554880000, r.EndMs);   // widest window kept
         Assert.Equal(12368, r.RowCount);
     }

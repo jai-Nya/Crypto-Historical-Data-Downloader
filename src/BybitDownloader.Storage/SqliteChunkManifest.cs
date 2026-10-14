@@ -13,11 +13,12 @@ public sealed class SqliteChunkManifest : IChunkManifest, IDisposable
 {
     private const string UpsertSql = """
         INSERT INTO chunks
-            (chunk_id, category, symbol, year, month, start_ms, end_ms, status,
+            (chunk_id, exchange, category, symbol, year, month, start_ms, end_ms, status,
              row_count, expected_candles, coverage, file_path, issues, updated_utc)
         VALUES
-            ($id, $cat, $sym, $y, $m, $s, $e, $st, $rc, $ec, $cov, $fp, $iss, $up)
+            ($id, $ex, $cat, $sym, $y, $m, $s, $e, $st, $rc, $ec, $cov, $fp, $iss, $up)
         ON CONFLICT(chunk_id) DO UPDATE SET
+            exchange = excluded.exchange,
             category = excluded.category,
             symbol = excluded.symbol,
             year = excluded.year,
@@ -66,6 +67,7 @@ public sealed class SqliteChunkManifest : IChunkManifest, IDisposable
                 PRAGMA busy_timeout=5000;
                 CREATE TABLE IF NOT EXISTS chunks (
                     chunk_id         TEXT    PRIMARY KEY,
+                    exchange         TEXT    NOT NULL DEFAULT 'bybit',
                     category         TEXT    NOT NULL,
                     symbol           TEXT    NOT NULL,
                     year             INTEGER NOT NULL,
@@ -82,14 +84,28 @@ public sealed class SqliteChunkManifest : IChunkManifest, IDisposable
                 );
                 """;
             cmd.ExecuteNonQuery();
+            MigrateSchema();
             MigrateChunkIds();
         }
     }
 
+    /// <summary>Adds the exchange column to databases created before multi-exchange support.</summary>
+    private void MigrateSchema()
+    {
+        using (var check = _connection.CreateCommand())
+        {
+            check.CommandText = "SELECT COUNT(*) FROM pragma_table_info('chunks') WHERE name = 'exchange';";
+            if (Convert.ToInt64(check.ExecuteScalar(), CultureInfo.InvariantCulture) > 0) return;
+        }
+        using var cmd = _connection.CreateCommand();
+        cmd.CommandText = "ALTER TABLE chunks ADD COLUMN exchange TEXT NOT NULL DEFAULT 'bybit';";
+        cmd.ExecuteNonQuery();
+    }
+
     /// <summary>
     /// Collapses legacy rows whose <c>chunk_id</c> embedded the request window (so a still-forming month kept
-    /// appending a new row per run) into the stable <c>{category}/{symbol}/{yyyyMM}</c> key, keeping the widest
-    /// <c>Done</c> row for each month. Idempotent and a no-op once keys are already stable.
+    /// appending a new row per run) into the stable <c>{exchange}/{category}/{symbol}/{yyyyMM}</c> key, keeping the
+    /// widest <c>Done</c> row for each month. Idempotent and a no-op once keys are already stable.
     /// </summary>
     private void MigrateChunkIds()
     {
@@ -97,7 +113,8 @@ public sealed class SqliteChunkManifest : IChunkManifest, IDisposable
         {
             check.CommandText =
                 "SELECT COUNT(*) FROM chunks WHERE chunk_id <> " +
-                "category || '/' || symbol || '/' || printf('%04d', year) || printf('%02d', month);";
+                "exchange || '/' || category || '/' || symbol || '/' || " +
+                "printf('%04d', year) || printf('%02d', month);";
             if (Convert.ToInt64(check.ExecuteScalar(), CultureInfo.InvariantCulture) == 0) return;
         }
 
@@ -107,13 +124,14 @@ public sealed class SqliteChunkManifest : IChunkManifest, IDisposable
                 SELECT rid FROM (
                     SELECT rowid AS rid,
                            ROW_NUMBER() OVER (
-                               PARTITION BY category, symbol, year, month
+                               PARTITION BY exchange, category, symbol, year, month
                                ORDER BY (status = 1) DESC, end_ms DESC, rowid DESC) AS rn
                     FROM chunks
                 ) WHERE rn = 1
             );
             UPDATE chunks
-               SET chunk_id = category || '/' || symbol || '/' || printf('%04d', year) || printf('%02d', month);
+               SET chunk_id = exchange || '/' || category || '/' || symbol ||
+                              '/' || printf('%04d', year) || printf('%02d', month);
             """;
         cmd.ExecuteNonQuery();
     }
@@ -130,10 +148,10 @@ public sealed class SqliteChunkManifest : IChunkManifest, IDisposable
         }
     }
 
-    public IReadOnlyList<ChunkRecord> GetAll() => Query("SELECT * FROM chunks ORDER BY category, symbol, month, start_ms;", null);
+    public IReadOnlyList<ChunkRecord> GetAll() => Query("SELECT * FROM chunks ORDER BY exchange, category, symbol, month, start_ms;", null);
 
     public IReadOnlyList<ChunkRecord> GetByStatus(ChunkStatus status) =>
-        Query("SELECT * FROM chunks WHERE status = $st ORDER BY category, symbol, month, start_ms;",
+        Query("SELECT * FROM chunks WHERE status = $st ORDER BY exchange, category, symbol, month, start_ms;",
             cmd => cmd.Parameters.AddWithValue("$st", (int)status));
 
     public void MarkPending(DownloadChunk chunk) =>
@@ -164,6 +182,7 @@ public sealed class SqliteChunkManifest : IChunkManifest, IDisposable
             using var cmd = _connection.CreateCommand();
             cmd.CommandText = UpsertSql;
             cmd.Parameters.AddWithValue("$id", chunk.Id);
+            cmd.Parameters.AddWithValue("$ex", chunk.Exchange.ToSlug());
             cmd.Parameters.AddWithValue("$cat", chunk.Category.ToApiString());
             cmd.Parameters.AddWithValue("$sym", chunk.Symbol);
             cmd.Parameters.AddWithValue("$y", chunk.Year);
@@ -209,7 +228,12 @@ public sealed class SqliteChunkManifest : IChunkManifest, IDisposable
         r.GetDouble(r.GetOrdinal("coverage")),
         r.IsDBNull(r.GetOrdinal("file_path")) ? null : r.GetString(r.GetOrdinal("file_path")),
         r.IsDBNull(r.GetOrdinal("issues")) ? null : r.GetString(r.GetOrdinal("issues")),
-        r.GetString(r.GetOrdinal("updated_utc")));
+        r.GetString(r.GetOrdinal("updated_utc")),
+        ReadExchange(r));
+
+    /// <summary>Parses the exchange column, tolerating unforeseen values as Bybit (forward-compatible).</summary>
+    private static Exchange ReadExchange(SqliteDataReader r) =>
+        ExchangeExtensions.TryParse(r.GetString(r.GetOrdinal("exchange")), out var e) ? e : Exchange.Bybit;
 
     public void Dispose()
     {

@@ -63,6 +63,24 @@ public class ScreeningTests
     }
 
     [Fact]
+    public void TradFi_is_excluded_by_default_and_included_when_enabled()
+    {
+        var stock = Inst("AAPLUSDT", symbolType: "stock");
+        var r = _svc.Evaluate(stock, T("AAPLUSDT"), ScreeningPresets.Balanced);
+        Assert.False(r.IsEligible);
+        Assert.Contains(r.Reasons, x => x.Contains("TradFi", StringComparison.OrdinalIgnoreCase));
+
+        var all = new[] { Inst("BTCUSDT"), stock, Inst("XAUUSDT", symbolType: "commodity"),
+            Inst("EURUSDT", symbolType: "forex"), Inst("ETFUSDT", symbolType: "ETF") };
+        var res = _svc.EvaluateAll(all, all.ToDictionary(i => i.Symbol, i => T(i.Symbol)),
+            ScreeningPresets.Balanced);
+        Assert.Equal([true, false, false, false, false], res.Select(x => x.IsEligible).ToArray());
+
+        Assert.True(_svc.Evaluate(stock, T("AAPLUSDT"),
+            ScreeningPresets.Balanced with { IncludeTradFi = true }).IsEligible);
+    }
+
+    [Fact]
     public void Price_range_uses_last_price_denominator()
     {
         var m = TickerMetricsCalculator.Compute(Inst(), T(last: 100, high: 103, low: 99));

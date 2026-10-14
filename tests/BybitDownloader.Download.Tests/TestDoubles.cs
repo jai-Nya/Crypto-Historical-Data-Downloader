@@ -2,12 +2,21 @@ using System.Collections.Concurrent;
 using BybitDownloader.Core.Api;
 using BybitDownloader.Core.Models;
 using BybitDownloader.Core.Planning;
+using BybitDownloader.Core.Telemetry;
 using BybitDownloader.Storage;
 
 namespace BybitDownloader.Download.Tests;
 
+/// <summary>Thread-safe telemetry sink that records every event, for assertions.</summary>
+public sealed class CollectingTelemetry : ITelemetry
+{
+    private readonly ConcurrentQueue<TelemetryEvent> _events = new();
+    public IReadOnlyList<TelemetryEvent> Events => _events.ToList();
+    public void Report(TelemetryEvent evt) => _events.Enqueue(evt);
+}
+
 /// <summary>Scripted market data. Returns candles (newest-first by default) for the requested inclusive window.</summary>
-public sealed class FakeMarketData : IBybitMarketData
+public sealed class FakeMarketData : IExchangeMarketData
 {
     private readonly Func<MarketCategory, string, long, long, IReadOnlyList<Candle>> _handler;
     private int _klinesCalls;
@@ -54,10 +63,14 @@ public sealed class FakeCandleStore : ICandleStore
 {
     public ConcurrentDictionary<string, List<Candle>> Files { get; } = new(StringComparer.OrdinalIgnoreCase);
 
-    public string GetPath(MarketCategory category, string symbol, int year, int month) =>
-        $"{category.ToApiString()}/{symbol}/{year:D4}-{month:D2}.parquet";
+    public string GetPath(Exchange exchange, MarketCategory category, string symbol, int year, int month) =>
+        $"{exchange.ToSlug()}/{category.ToApiString()}/{symbol}/{year:D4}-{month:D2}.parquet";
 
-    public string GetPath(DownloadChunk chunk) => GetPath(chunk.Category, chunk.Symbol, chunk.Year, chunk.Month);
+    public string GetPath(MarketCategory category, string symbol, int year, int month) =>
+        GetPath(Exchange.Bybit, category, symbol, year, month);
+
+    public string GetPath(DownloadChunk chunk) =>
+        GetPath(chunk.Exchange, chunk.Category, chunk.Symbol, chunk.Year, chunk.Month);
 
     public bool Exists(string path) => Files.ContainsKey(path);
 

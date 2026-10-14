@@ -3,6 +3,7 @@ using System.Net.Http.Headers;
 using BybitDownloader.Core.Api;
 using BybitDownloader.Core.Models;
 using BybitDownloader.Core.Resilience;
+using BybitDownloader.Core.Telemetry;
 
 namespace BybitDownloader.Core.Tests;
 
@@ -154,5 +155,20 @@ public class ApiClientTests
         await Assert.ThrowsAnyAsync<OperationCanceledException>(
             () => client.GetKlinesAsync(MarketCategory.Linear, "BTCUSDT", Fx.B, Fx.B, cts.Token));
         Assert.Empty(handler.Urls);
+    }
+
+    [Fact]
+    public async Task Telemetry_reports_retries()
+    {
+        var (client, _, _, _) = Build((_, n) =>
+            n == 1 ? Json("oops", HttpStatusCode.BadGateway) : Json(Fx.KlineJson(Fx.B)));
+        var collector = new CollectingTelemetry();
+        client.Telemetry = collector;
+
+        await client.GetKlinesAsync(MarketCategory.Linear, "BTCUSDT", Fx.B, Fx.B, CancellationToken.None);
+
+        var retry = Assert.Single(collector.Events, e => e.Kind == TelemetryKind.Retry);
+        Assert.Equal(1, retry.Attempt);
+        Assert.Equal(TelemetryLevel.Warning, retry.Level);
     }
 }

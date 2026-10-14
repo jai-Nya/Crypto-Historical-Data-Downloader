@@ -20,6 +20,11 @@ public sealed record ScreeningSettings
     public decimal? MaxSpreadPct { get; init; } = null;
     public bool RequireTrading { get; init; } = true;
     public bool RequirePerpetual { get; init; } = true;
+    /// <summary>
+    /// When false (default) TradFi contracts (stocks, commodities, forex, ETFs) are excluded. Crypto
+    /// perpetuals report an empty symbolType, so this only ever affects TradFi listings.
+    /// </summary>
+    public bool IncludeTradFi { get; init; } = false;
     /// <summary>Second-stage (candle-based) thresholds. Null = stage disabled.</summary>
     public ActivityThresholds? Activity { get; init; } = null;
 }
@@ -89,8 +94,11 @@ public sealed class LiquidityFilterService
         var reasons = new List<string>();
         var m = TickerMetricsCalculator.Compute(inst, ticker);
 
-        if (s.RequirePerpetual && !inst.IsPerpetual) reasons.Add($"Not a perpetual contract ({inst.ContractType})");
+        if (s.RequirePerpetual && inst.Category != MarketCategory.Spot && !inst.IsPerpetual)
+            reasons.Add($"Not a perpetual contract ({inst.ContractType})");
         if (s.RequireTrading && !inst.IsTrading) reasons.Add($"Status is '{inst.Status}', not Trading");
+        if (!s.IncludeTradFi && inst.IsTradFi)
+            reasons.Add("TradFi instrument excluded (stock/commodity/forex/ETF)");
 
         var tickerFilterOn = s.MinTurnover24h is not null || s.MinOpenInterestValue is not null
                              || s.MinPriceRangePct is not null || s.MaxSpreadPct is not null;

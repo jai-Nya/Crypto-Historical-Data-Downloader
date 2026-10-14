@@ -30,6 +30,9 @@ public sealed record UniverseScreenOptions
 
     /// <summary>Half-open sample window for the optional candle-based activity stage. Required when Settings.Activity is set.</summary>
     public UtcRange? ActivitySample { get; init; }
+
+    /// <summary>Candidates whose activity is sampled concurrently in stage 2.</summary>
+    public int ActivityMaxConcurrency { get; init; } = 8;
 }
 
 /// <summary>
@@ -38,13 +41,15 @@ public sealed record UniverseScreenOptions
 /// </summary>
 public sealed class UniverseScreener
 {
-    private readonly IBybitMarketData _market;
+    private readonly IExchangeMarketData _market;
     private readonly LiquidityFilterService _filter;
+    private readonly ExchangeProfile _profile;
 
-    public UniverseScreener(IBybitMarketData market, LiquidityFilterService? filter = null)
+    public UniverseScreener(IExchangeMarketData market, LiquidityFilterService? filter = null, ExchangeProfile? profile = null)
     {
         _market = market;
         _filter = filter ?? new LiquidityFilterService();
+        _profile = profile ?? ExchangeProfiles.Get(market is ExchangeHttpClient c ? c.Profile.Exchange : Exchange.Bybit);
     }
 
     public async Task<UniverseSnapshot> FetchAsync(IEnumerable<MarketCategory> categories, CancellationToken ct)
@@ -59,9 +64,6 @@ public sealed class UniverseScreener
         }
         return new UniverseSnapshot(instruments, tickers);
     }
-
-    public IReadOnlyList<ScreeningResult> ScreenInstruments(UniverseSnapshot snapshot, ScreeningSettings settings) =>
-        _filter.EvaluateAll(snapshot.Instruments, snapshot.Tickers, settings);
 
     public async Task<UniverseScreenResult> ScreenAsync(UniverseScreenOptions options, CancellationToken ct)
     {
@@ -92,21 +94,39 @@ public sealed class UniverseScreener
 
         if (settings.Activity is { } thresholds && options.ActivitySample is { } sample)
         {
-            var survivors = new List<SelectedSymbol>();
-            foreach (var candidate in candidates)
+            var results = new ActivityScreenResult?[candidates.Count];
+            var failures = new string?[candidates.Count];
+            var parallelOptions = new ParallelOptions
             {
+                MaxDegreeOfParallelism = options.ActivityMaxConcurrency,
+                CancellationToken = ct
+            };
+            await Parallel.ForEachAsync(Enumerable.Range(0, candidates.Count), parallelOptions, async (i, token) =>
+            {
+                var candidate = candidates[i];
                 try
                 {
-                    var activity = await MeasureActivityAsync(candidate, sample, thresholds.AtrPeriod, ct).ConfigureAwait(false);
+                    var activity = await MeasureActivityAsync(candidate, sample, thresholds.AtrPeriod, token).ConfigureAwait(false);
                     var reasons = _filter.EvaluateActivity(activity, thresholds);
-                    var ok = reasons.Count == 0;
-                    activityResults.Add(new ActivityScreenResult(candidate.Category, candidate.Symbol, ok, reasons, activity));
-                    if (ok) survivors.Add(candidate);
+                    results[i] = new ActivityScreenResult(candidate.Category, candidate.Symbol, reasons.Count == 0, reasons, activity);
                 }
                 catch (ApiException ex)
                 {
-                    errors.Add($"{candidate.Symbol}: {ex.Message}");
+                    failures[i] = $"{candidate.Symbol}: {ex.Message}";
                 }
+            }).ConfigureAwait(false);
+
+            var survivors = new List<SelectedSymbol>();
+            for (var i = 0; i < candidates.Count; i++)
+            {
+                if (failures[i] is { } failure)
+                {
+                    errors.Add(failure);
+                    continue;
+                }
+                var result = results[i]!;
+                activityResults.Add(result);
+                if (result.IsEligible) survivors.Add(candidates[i]);
             }
             selected = survivors;
         }
@@ -118,7 +138,8 @@ public sealed class UniverseScreener
         SelectedSymbol symbol, UtcRange sample, int atrPeriod, CancellationToken ct)
     {
         var candles = new List<Candle>();
-        foreach (var window in DownloadPlanner.Windows(sample.StartMs, sample.EndMs))
+        var max = _profile.MaxCandlesPerRequest(symbol.Category);
+        foreach (var window in DownloadPlanner.Windows(sample.StartMs, sample.EndMs, max))
         {
             var raw = await _market.GetKlinesAsync(
                 symbol.Category, symbol.Symbol, window.StartMs, window.EndMsInclusive, ct).ConfigureAwait(false);

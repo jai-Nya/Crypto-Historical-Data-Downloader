@@ -44,7 +44,7 @@ public class CandleStoreTests : IDisposable
     {
         var store = new ParquetCandleStore(_dir);
         var path = store.GetPath(MarketCategory.Inverse, "BTCUSD", 2024, 3);
-        Assert.Equal(Path.Combine("inverse", "BTCUSD", "2024-03.parquet"), path[(store.RootDirectory.Length + 1)..]);
+        Assert.Equal(Path.Combine("bybit", "inverse", "BTCUSD", "2024-03.parquet"), path[(store.RootDirectory.Length + 1)..]);
     }
 
     [Fact]

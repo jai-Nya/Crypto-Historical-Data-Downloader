@@ -10,6 +10,9 @@ namespace BybitDownloader.Download;
 /// </summary>
 public sealed record DownloadJob
 {
+    /// <summary>One exchange governs the whole run; the market client is built for it.</summary>
+    public Exchange Exchange { get; init; } = Exchange.Bybit;
+
     public required IReadOnlyList<MarketCategory> Categories { get; init; }
 
     /// <summary>When true the universe is screened; otherwise <see cref="Symbols"/> are resolved by name.</summary>
